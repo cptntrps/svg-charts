@@ -1,0 +1,103 @@
+---
+name: svg-charts
+description: Use when a page, report, or dashboard needs charts (line, bar, waterfall, scatter, diverging, dumbbell, stacked) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
+---
+
+# svg-charts
+
+Build charts as **plain inline-SVG strings**. No Chart.js, D3, Plotly, canvas,
+or CDN. Each builder is a pure function that returns an `<svg>` string you drop
+into `innerHTML` or write into a server-rendered page. The output is one
+self-contained file with no external chart runtime.
+
+## When to use this
+
+- A single self-contained HTML page or report must carry its own charts.
+- The environment blocks external scripts (strict CSP, air-gapped, email-safe).
+- You render HTML server-side and want charts in the string, not after hydration.
+- You want charts that follow the page theme (light/dark) through CSS variables.
+
+Do **not** reach for this when the page needs live pan/zoom, brushing, or
+animated transitions across thousands of points. Use a full charting library
+there.
+
+## How to use it
+
+`charts.js` is one ES module with named exports. Import it, call a builder, and
+insert the returned string.
+
+```js
+import { lineChart, barChart } from './charts.js';
+
+document.getElementById('revenue').innerHTML = lineChart({
+  label: 'Monthly revenue against plan',
+  labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+  series: [{ name: 'Actual', points: [
+    { x: 'Jan', y: 120 }, { x: 'Feb', y: 140 }, { x: 'Mar', y: 135 },
+    { x: 'Apr', y: 162 }, { x: 'May', y: 180 }, { x: 'Jun', y: 205 }] }],
+  target: 150,
+  fmtY: v => '$' + v + 'k',
+});
+```
+
+Server-side is identical: the function returns a string, so write it straight
+into the page you generate. No DOM is required to build the SVG.
+
+## Builders
+
+Every builder takes one options object and returns an SVG string. Common
+options: `label` (accessible name, required for screen readers), `width`,
+`height`, and `fmtY` / `fmtX` (value formatters; default is a thousands-grouped
+number).
+
+| Builder | Shape of data | Use for |
+|---|---|---|
+| `lineChart` | `series:[{name,color?,dash?,points:[{x,y}]}]`, `labels:[...]`, `target?` | trends over ordered categories |
+| `barChart` | `data:[{label,value,color?}]`, `target?` | magnitude by category |
+| `waterfall` | `items:[{label,value,total?}]` | how a start value bridges to an end value |
+| `scatter` | `groups:[{name,color?,points:[{x,y,tip?}],line?:{from,to,fn}}]` | relationship of two measures, optional fitted line |
+| `divergingBars` | `data:[{label,value,color?}]` | change that can be positive or negative |
+| `dumbbell` | `rows:[{label,a,b,color?}]`, `aLabel`, `bLabel` | two states per row (before vs after) |
+| `stackedBars` | `columns:[{label,parts:{key:value}}]`, `keys:[...]`, `colors:[...]` | shares that sum within each column |
+
+Helpers are also exported: `niceTicks(lo,hi,n)` (round axis steps), `svg(w,h,body,label)`
+(the wrapper), `esc`, `fin`, and `palette(i)`.
+
+## Theming
+
+Charts read their colors from CSS custom properties on the host page, so they
+follow light/dark mode with no JS. Set these where you like (defaults in
+parentheses):
+
+```css
+:root {
+  --chart-grid: #e4e6e5;        /* gridlines */
+  --chart-axis-text: #6f7980;   /* tick labels */
+  --chart-ink: #141716;         /* value labels */
+  --chart-target: #c0392b;      /* target line */
+  --chart-1: #2a78d6; --chart-2: #0ca37a; --chart-3: #8d5bd6;
+  --chart-4: #d98500; --chart-5: #d03b3b;   /* series palette */
+  --chart-up: #2a78d6; --chart-down: #0ca37a; --chart-total: #8d979d;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --chart-grid:#2a2f2d; --chart-axis-text:#9aa3a0; --chart-ink:#eef2f0; }
+}
+```
+
+Per-series `color` options override the palette when you pass them.
+
+## Rules the builders already follow
+
+- **Accessible.** Each SVG carries `role="img"` and an `aria-label` from `label`;
+  points carry `<title>` tooltips. Always pass a meaningful `label`.
+- **Safe text.** Every label and value is HTML-escaped before it enters the SVG.
+- **Honest axes.** Axes start at zero for magnitude charts and use round
+  `niceTicks` steps; a `target` above the data is reported in words instead of
+  silently clipped.
+- **Compact output.** Coordinates are rounded to two decimals.
+
+## Verify
+
+Open `demo.html` in a browser (or render it headless) to see every builder with
+sample data in both light and dark mode. That page is the reference for the
+option shapes and the theme variables.

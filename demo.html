@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>svg-charts demo</title>
+<style>
+:root{
+  color-scheme: light dark;
+  --bg:#faf9f5; --surface:#ffffff; --rule:#e4e6e5; --text:#141716; --muted:#6f7980;
+  --chart-grid:#e4e6e5; --chart-axis-text:#6f7980; --chart-ink:#141716; --chart-target:#c0392b;
+  --chart-1:#2a78d6; --chart-2:#0ca37a; --chart-3:#8d5bd6; --chart-4:#d98500; --chart-5:#d03b3b;
+  --chart-up:#2a78d6; --chart-down:#0ca37a; --chart-total:#8d979d; --chart-paper:#ffffff;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0d1113; --surface:#151a1d; --rule:#262d31; --text:#eef2f0; --muted:#9aa3a0;
+  --chart-grid:#262d31; --chart-axis-text:#9aa3a0; --chart-ink:#eef2f0;
+  --chart-up:#3987e5; --chart-down:#12b386; --chart-total:#727c82; --chart-paper:#151a1d;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6rem;margin:0 0 4px}
+p.lede{color:var(--muted);margin:0 0 24px;max-width:60ch}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px;margin:16px 0}
+.card h2{font-size:1rem;margin:0 0 10px}
+.chart{width:100%;height:auto;display:block;font-family:system-ui,sans-serif}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.85em;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>svg-charts</h1>
+<p class="lede">Dependency-free inline-SVG charts. Every chart on this page is a
+string returned by <code>charts.js</code> and dropped into the card. Switch your
+OS between light and dark to see the theme follow.</p>
+
+<div class="card"><h2>lineChart</h2><div id="line"></div></div>
+<div class="card"><h2>barChart</h2><div id="bar"></div></div>
+<div class="card"><h2>waterfall</h2><div id="wf"></div></div>
+<div class="card"><h2>scatter (with fitted line)</h2><div id="sc"></div></div>
+<div class="card"><h2>divergingBars</h2><div id="dv"></div></div>
+<div class="card"><h2>dumbbell</h2><div id="db"></div></div>
+<div class="card"><h2>stackedBars</h2><div id="st"></div></div>
+
+<script type="module">
+import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars } from './charts.js';
+
+const months = ['Jan','Feb','Mar','Apr','May','Jun'];
+const usd = v => '$' + v + 'k';
+
+document.getElementById('line').innerHTML = lineChart({
+  label: 'Monthly revenue against plan', labels: months, target: 150, fmtY: usd,
+  series: [
+    { name: 'Actual', points: months.map((m,i)=>({x:m,y:[120,140,135,162,180,205][i]})) },
+    { name: 'Forecast', dash: '5 4', points: months.map((m,i)=>({x:m,y:[118,132,146,159,173,187][i]})) },
+  ],
+});
+
+document.getElementById('bar').innerHTML = barChart({
+  label: 'Orders by channel', fmtY: v => v.toLocaleString(), target: 900,
+  data: [
+    { label: 'Search', value: 1240 }, { label: 'Social', value: 860 },
+    { label: 'Email', value: 640 }, { label: 'Direct', value: 980 }, { label: 'Referral', value: 410 },
+  ],
+});
+
+document.getElementById('wf').innerHTML = waterfall({
+  label: 'Gross-to-net bridge', fmtY: usd,
+  items: [
+    { label: 'Gross', value: 300, total: true },
+    { label: 'Discounts', value: -46 }, { label: 'Returns', value: -22 }, { label: 'Fees', value: -18 },
+    { label: 'Net', value: 214, total: true },
+  ],
+});
+
+document.getElementById('sc').innerHTML = scatter({
+  label: 'Spend versus orders', xLabel: 'weekly spend', yLabel: 'weekly orders',
+  fmtX: v => '$' + (v/1000) + 'k', fmtY: v => v.toLocaleString(),
+  groups: [{
+    name: 'Weeks', line: { from: 0, to: 20000, fn: x => x / 42 },
+    points: [[6200,150],[8100,205],[9700,220],[12000,300],[14500,330],[16800,360],[19000,430]]
+      .map(([x,y])=>({x,y})),
+  }],
+});
+
+document.getElementById('dv').innerHTML = divergingBars({
+  label: 'Change in orders by product', fmtY: v => v.toLocaleString(),
+  data: [
+    { label: 'A', value: 420 }, { label: 'B', value: 180 }, { label: 'C', value: -90 },
+    { label: 'D', value: -260 }, { label: 'E', value: 60 },
+  ],
+});
+
+document.getElementById('db').innerHTML = dumbbell({
+  label: 'Cost per order, start versus end of quarter', aLabel: 'April', bLabel: 'June', fmtY: usd,
+  rows: [
+    { label: 'Line one', a: 58, b: 41 }, { label: 'Line two', a: 47, b: 44 },
+    { label: 'All lines', a: 52, b: 43, color: 'var(--chart-ink)' },
+  ],
+});
+
+document.getElementById('st').innerHTML = stackedBars({
+  label: 'Spend mix by month', keys: ['top','mid','low'],
+  colors: ['var(--chart-1)','var(--chart-2)','var(--chart-3)'],
+  columns: months.map((m,i)=>({ label:m, parts:{
+    top: [0.5,0.48,0.46,0.44,0.42,0.40][i], mid: [0.3,0.31,0.33,0.34,0.35,0.36][i], low: [0.2,0.21,0.21,0.22,0.23,0.24][i] } })),
+});
+</script>
+</div>
+</body>
+</html>
