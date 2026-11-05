@@ -35,13 +35,15 @@ el.innerHTML = lineChart({
 ```
 
 Every builder also takes `title`, `unit`, `source` and `annotations` (one
-callout per entry) for presentation-ready charts:
+callout per entry) for presentation-ready charts, plus `legend: true` and a
+`colors` map that keeps one colour per name across every chart in a deck:
 
 ```js
 barChart({
   title: 'Orders by channel', unit: 'orders', source: 'Order ledger, Q2 2026',
-  data: [{ label: 'Search', value: 1240 }, { label: 'Social', value: 860 }],
+  data: [{ label: 'Search', value: 1240, series: 'Paid' }, { label: 'Social', value: 860, series: 'Organic' }],
   annotations: [{ index: 0, text: 'peak' }],
+  legend: true, colors: { Paid: '#2a78d6', Organic: '#0ca37a' },
 });
 ```
 

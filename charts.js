@@ -68,6 +68,35 @@ function frame({ title, unit, source, H }) {
   return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco };
 }
 
+// Colour of a named item: explicit `color` first, then the `colors` map by name,
+// then the fallback (palette or kind colour). One name, one colour across charts.
+const pickColor = (explicit, colors, names, fallback) =>
+  explicit || names.map(n => n != null && colors ? colors[n] : undefined).find(Boolean) || fallback;
+
+// Legend rows under the title band: per entry a 14x3 swatch (or a hollow/filled
+// marker) in the entry colour and its name in 12px axis text, wrapped to the
+// chart width. Returns the svg and the height the plot gives up.
+const LEGEND_ROW = 16;
+function legendRows(entries, W, y0) {
+  let x = 4, row = 0, out = '';
+  entries.forEach(e => {
+    const w = 20 + textW(e.name, 12);
+    if (x > 4 && x + w > W - 4) { x = 4; row++; }
+    const y = y0 + row * LEGEND_ROW;
+    out += e.marker === 'hollow' ? `<circle cx="${x + 7}" cy="${y + 8}" r="4" fill="var(--chart-paper,#fff)" stroke="${e.color}" stroke-width="2"/>`
+      : e.marker === 'filled' ? `<circle cx="${x + 7}" cy="${y + 8}" r="4" fill="${e.color}"/>`
+      : `<rect x="${x}" y="${y + 6.5}" width="14" height="3" rx="1.5" fill="${e.color}"/>`;
+    out += `<text x="${x + 20}" y="${y + 12}" font-size="12" fill="${AXIS}">${esc(e.name)}</text>`;
+    x += w + 16;
+  });
+  return { svg: out, height: entries.length ? (row + 1) * LEGEND_ROW + 2 : 0 };
+}
+// Legend entries for bar-type data that names a `series` per item; empty otherwise.
+function seriesLegend(items, colors) {
+  const names = [...new Set(items.map(d => d.series).filter(n => n != null))];
+  return names.map((n, i) => ({ name: n, color: pickColor(null, colors, [n], palette(i)) }));
+}
+
 // Text width estimate (a string builder has no font metrics): 0.6em per character.
 const textW = (s, fs) => String(s).length * fs * 0.6;
 // Box of a text label with its baseline at (x, y). `m` is the clearance a callout
@@ -156,11 +185,14 @@ function gridY(ticks, L, R, W, Y, fmt) {
 // ---------- line chart (multi-series) ----------
 // series: [{ name, color?, dash?, points:[{x,y}] }]; labels: the ordered x categories.
 export function lineChart({ series = [], labels = [], label, width = 600, height = 280,
-  target = null, fmtY = num, title, unit, source, annotations = [] } = {}) {
+  target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'line chart';
-  const L = 54, R = 16, Tp = 14 + f.top, B = 34, W = width, H = height - f.bottom;
+  const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
+  const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], width, f.top);
+  const deco = f.deco + lg.svg;
+  const L = 54, R = 16, Tp = 14 + f.top + lg.height, B = 34, W = width, H = height - f.bottom;
   const ys = series.flatMap(s => s.points.map(p => p.y)).filter(fin);
-  if (!ys.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!ys.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   let ymax = Math.max(...ys) * 1.1;
   const tIn = target != null && fin(target) && target <= ymax * 2;
   if (tIn) ymax = Math.max(ymax, target * 1.1);
@@ -171,15 +203,22 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
   const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
   g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
     ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
-  const avoid = [];
+  const avoid = [], placed = [];
   series.forEach((s, si) => {
-    const col = s.color || palette(si);
+    const col = colorOf(s, si);
     const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
     g += `<polyline fill="none" stroke="${col}" stroke-width="2.4" stroke-dasharray="${s.dash || ''}" ` +
       `points="${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')}"/>`;
     g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
       `<title>${esc(s.name)} ${esc(labels[p[0]])}: ${esc(fmtY(p[1]))}</title></circle>`).join('');
     for (let i = 1; i < pts.length; i++) avoid.push(segment(X(pts[i - 1][0]), Y(pts[i - 1][1]), X(pts[i][0]), Y(pts[i][1])));
+    if (valueLabels) pts.forEach(p => {        // one 11px label above each point; a label that would overlap an earlier one is skipped
+      const t = fmtY(p[1]), anchor = p[0] === 0 ? 'start' : p[0] === labels.length - 1 ? 'end' : 'middle';
+      const box = labelBox(X(p[0]), Y(p[1]) - 7, t, anchor, 11, 2);
+      if (placed.some(b => nearBox(box, b))) return;
+      placed.push(box); avoid.push(box);
+      g += axisText(X(p[0]), Y(p[1]) - 7, anchor, t, `fill="${INK}" font-weight="700" font-size="11"`);
+    });
   });
   if (target != null && fin(target)) {
     const tl = 'target ' + fmtY(target);
@@ -197,17 +236,21 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     const p = s.points.find(p => p.x === x);
     return p && [X(a.index), Y(p.y)];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- vertical bar chart ----------
 // data: [{ label, value, color? }]
+// Items may name a `series`; items of one series share a colour and `legend: true` lists the series.
 export function barChart({ data = [], label, width = 600, height = 260,
-  target = null, fmtY = num, title, unit, source, annotations = [] } = {}) {
+  target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'bar chart';
-  const L = 54, R = 14, Tp = 16 + f.top, B = 34, W = width, H = height - f.bottom;
+  const groups = seriesLegend(data, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
+  const colorOf = (d, i) => pickColor(d.color, colors, [d.label, d.series],
+    d.series != null ? groups.find(e => e.name === d.series).color : palette(i));
+  const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 34, W = width, H = height - f.bottom;
   const vals = data.map(d => d.value).filter(fin);
-  if (!vals.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
   const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
@@ -215,7 +258,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
   let g = gridY(ticks, L, R, W, Y, fmtY);
   data.forEach((d, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, y = Y(Math.max(0, d.value)), h = Math.max(1, Math.abs(Y(d.value) - Y(0)));
-    const col = d.color || palette(i);
+    const col = colorOf(d, i);
     g += `<rect x="${round2(x)}" y="${round2(y)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
       `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
     g += axisText(x + w / 2, y - 5, 'middle', fmtY(d.value), `fill="${INK}" font-weight="600"`);
@@ -232,28 +275,30 @@ export function barChart({ data = [], label, width = 600, height = 260,
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index]];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- waterfall / bridge ----------
 // items: [{ label, value, total? }]  total bars are drawn from zero; others step the running sum.
 export function waterfall({ items = [], label, width = 600, height = 290, fmtY = num,
-  title, unit, source, annotations = [] } = {}) {
+  title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'waterfall';
-  const L = 54, R = 10, Tp = 18 + f.top, B = 46, W = width, H = height - f.bottom;
+  const groups = seriesLegend(items, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
+  const L = 54, R = 10, Tp = 18 + f.top + lg.height, B = 46, W = width, H = height - f.bottom;
   const bars = []; let run = 0;
   for (const it of items) {
-    if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value }); run = it.value; }
-    else { bars.push({ name: it.label, from: run, to: run + it.value, kind: it.value < 0 ? 'down' : 'up', delta: it.value }); run += it.value; }
+    if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value, it }); run = it.value; }
+    else { bars.push({ name: it.label, from: run, to: run + it.value, kind: it.value < 0 ? 'down' : 'up', delta: it.value, it }); run += it.value; }
   }
-  if (!bars.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!bars.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   let ymax = Math.max(...bars.map(b => Math.max(b.from, b.to))) * 1.12;
   const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
   const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B), avoid = [];
   let g = gridY(ticks, L, R, W, Y, fmtY);
   bars.forEach((b, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, top = Y(Math.max(b.from, b.to)), h = Math.max(1, Math.abs(Y(b.from) - Y(b.to)));
-    const col = b.kind === 'total' ? 'var(--chart-total,#8d979d)' : b.kind === 'down' ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#d03b3b)';
+    const kindCol = b.kind === 'total' ? 'var(--chart-total,#8d979d)' : b.kind === 'down' ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#d03b3b)';
+    const col = pickColor(b.it.color, colors, [b.name, b.it.series], b.it.series != null ? groups.find(e => e.name === b.it.series).color : kindCol);
     const val = b.kind === 'total' ? fmtY(b.to) : (b.delta < 0 ? '−' : '+') + fmtY(Math.abs(b.delta));
     const fs = bw < 90 ? 11 : 13;
     g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
@@ -268,17 +313,20 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
     const b = pick(bars, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to)), avoid[a.index]];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- scatter (optional fitted line per group) ----------
 // groups: [{ name, color?, points:[{x,y, tip?}], line?:{from,to,fn} }]
 export function scatter({ groups = [], label, width = 600, height = 330,
-  xLabel = '', yLabel = '', fmtX = num, fmtY = num, title, unit, source, annotations = [] } = {}) {
+  xLabel = '', yLabel = '', fmtX = num, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'scatter';
-  const L = 54, R = 16, Tp = 22 + f.top, B = 38, W = width, H = height - f.bottom;
+  const colorOf = (gr, gi) => pickColor(gr.color, colors, [gr.name], palette(gi));
+  const lg = legendRows(legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], width, f.top);
+  const deco = f.deco + lg.svg;
+  const L = 54, R = 16, Tp = 22 + f.top + lg.height, B = 38, W = width, H = height - f.bottom;
   const pts = groups.flatMap(g => g.points || []);
-  if (!pts.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!pts.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   const xt = niceTicks(0, Math.max(...pts.map(p => p.x)) * 1.05), XM = xt[xt.length - 1] || 1;
   const yt = niceTicks(0, Math.max(...pts.map(p => p.y)) * 1.08), YM = yt[yt.length - 1] || 1;
   const X = v => L + v / XM * (W - L - R), Y = v => Tp + (1 - v / YM) * (H - Tp - B);
@@ -287,7 +335,7 @@ export function scatter({ groups = [], label, width = 600, height = 330,
   if (xLabel) g += axisText(W - R, H - 2, 'end', xLabel);
   if (yLabel) g += axisText(L + 4, Tp + 10, 'start', yLabel, `font-weight="600"`);
   groups.forEach((gr, gi) => {
-    const col = gr.color || palette(gi);
+    const col = colorOf(gr, gi);
     if (gr.line && typeof gr.line.fn === 'function') {
       const n = 30, p = [];
       for (let i = 0; i <= n; i++) { const x = gr.line.from + (gr.line.to - gr.line.from) * i / n; p.push(round2(X(x)) + ',' + round2(Y(gr.line.fn(x)))); }
@@ -297,17 +345,18 @@ export function scatter({ groups = [], label, width = 600, height = 330,
       `<title>${esc(p.tip || (gr.name + ': ' + fmtX(p.x) + ', ' + fmtY(p.y)))}</title></circle>`).join('');
   });
   g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- diverging bars (change, positive and negative from zero) ----------
 // data: [{ label, value, color? }]
 export function divergingBars({ data = [], label, width = 600, height = 280, fmtY = num,
-  title, unit, source, annotations = [] } = {}) {
+  title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'change';
-  const L = 54, R = 14, Tp = 16 + f.top, B = 20, W = width, H = height - f.bottom;
+  const groups = seriesLegend(data, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
+  const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 20, W = width, H = height - f.bottom;
   const vals = data.map(d => d.value).filter(fin);
-  if (!vals.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   const lo = Math.min(0, ...vals) * 1.12, hi = Math.max(0, ...vals) * 1.12;
   const ticks = niceTicks(lo, hi); const tmin = ticks[0], tmax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - (v - tmin) / (tmax - tmin)) * (H - Tp - B);
@@ -317,7 +366,8 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
   data.forEach((d, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, yv = Y(d.value);
     const top = Math.min(zero, yv), h = Math.max(1, Math.abs(yv - zero));
-    const col = d.color || (d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)');
+    const signCol = d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)';
+    const col = pickColor(d.color, colors, [d.label, d.series], d.series != null ? groups.find(e => e.name === d.series).color : signCol);
     const val = (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), vy = d.value >= 0 ? top - 5 : top + h + 13;
     g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
       `<title>${esc(d.label)}: ${esc(val)}</title></rect>`;
@@ -329,27 +379,29 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(d.value), avoid[a.index]];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- dumbbell (two points per row, e.g. before vs after) ----------
 // rows: [{ label, a, b, color? }]
 // Height follows the row count, so here the bands add to the height instead of shrinking the plot.
+// Its legend names the two ends: a hollow marker for `aLabel`, a filled one for `bLabel`.
 export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel = 'B', fmtY = num,
-  title, unit, source, annotations = [] } = {}) {
-  const plotH = Math.max(120, 16 + 28 + rows.length * 38);
-  const f = frame({ title, unit, source, H: plotH + (title != null || unit != null ? TOP_BAND : 0) + (source != null ? BOTTOM_BAND : 0) });
-  const lab = label ?? title ?? 'dumbbell';
-  const L = 150, R = 20, Tp = 16 + f.top, B = 28, W = width, H = plotH + f.top, height = H + f.bottom;
+  title, unit, source, annotations = [], legend = false, colors } = {}) {
+  const plotH = Math.max(120, 16 + 28 + rows.length * 38), bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lg = legendRows(legend ? [{ name: aLabel, color: INK, marker: 'hollow' }, { name: bLabel, color: INK, marker: 'filled' }] : [], width, bandTop);
+  const f = frame({ title, unit, source, H: plotH + bandTop + lg.height + (source != null ? BOTTOM_BAND : 0) });
+  const lab = label ?? title ?? 'dumbbell', deco = f.deco + lg.svg;
+  const L = 150, R = 20, Tp = 16 + f.top + lg.height, B = 28, W = width, H = plotH + f.top + lg.height, height = H + f.bottom;
   const vals = rows.flatMap(r => [r.a, r.b]).filter(fin);
-  if (!vals.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
   const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
   const rowH = (H - Tp - B) / rows.length;
   let g = ticks.map(t => `<line x1="${round2(X(t))}" x2="${round2(X(t))}" y1="${Tp}" y2="${H - B}" stroke="${GRID}"/>` +
     axisText(X(t), H - B + 16, 'middle', fmtY(t))).join('');
   rows.forEach((r, i) => {
-    const y = Tp + (i + 0.5) * rowH, col = r.color || palette(i);
+    const y = Tp + (i + 0.5) * rowH, col = pickColor(r.color, colors, [r.label], palette(i));
     g += axisText(L - 10, y + 4, 'end', r.label, `fill="${INK}"`);
     g += `<line x1="${round2(X(r.a))}" x2="${round2(X(r.b))}" y1="${round2(y)}" y2="${round2(y)}" stroke="${col}" stroke-width="2"/>`;
     g += `<circle cx="${round2(X(r.a))}" cy="${round2(y)}" r="5" fill="var(--chart-paper,#fff)" stroke="${col}" stroke-width="2"><title>${esc(r.label)} ${esc(aLabel)}: ${esc(fmtY(r.a))}</title></circle>`;
@@ -359,16 +411,19 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
     const r = pick(rows, a.index, 'index'), s = pick([r.a, r.b], a.series ?? 0, 'series');
     return [X(s), Tp + (a.index + 0.5) * rowH];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 // ---------- stacked bars (shares that sum per column) ----------
-// columns: [{ label, parts: { key: value, ... } }]; keys + colors give the stack order.
+// columns: [{ label, parts: { key: value, ... } }]; keys give the stack order.
+// colors: an array by key position, or an object by key name.
 export function stackedBars({ columns = [], keys = [], colors = [], label, width = 600, height = 280, fmtY = v => Math.round(v * 100) + '%',
-  title, unit, source, annotations = [] } = {}) {
+  title, unit, source, annotations = [], legend = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'stacked';
-  const L = 44, R = 14, Tp = 14 + f.top, B = 30, W = width, H = height - f.bottom;
-  if (!columns.length || !keys.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  const colorOf = (k, ki) => (Array.isArray(colors) ? colors[ki] : colors[k]) || palette(ki);
+  const lg = legendRows(legend ? keys.map((k, ki) => ({ name: k, color: colorOf(k, ki) })) : [], width, f.top), deco = f.deco + lg.svg;
+  const L = 44, R = 14, Tp = 14 + f.top + lg.height, B = 30, W = width, H = height - f.bottom;
+  if (!columns.length || !keys.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   const totals = columns.map(c => keys.reduce((a, k) => a + (c.parts[k] || 0), 0));
   const norm = columns.map((c, i) => totals[i] > 0 ? totals[i] : 1);
   const Y = v => Tp + (1 - v) * (H - Tp - B);               // v is a 0..1 share
@@ -380,7 +435,7 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
     keys.forEach((k, ki) => {
       const share = (c.parts[k] || 0) / norm[i]; if (share <= 0) { tops[i][ki] = Y(acc); return; }
       const y0 = Y(acc + share), h = Math.abs(Y(acc) - Y(acc + share)); acc += share; tops[i][ki] = y0;
-      g += `<rect x="${round2(x)}" y="${round2(y0)}" width="${round2(w)}" height="${round2(h)}" fill="${colors[ki] || palette(ki)}">` +
+      g += `<rect x="${round2(x)}" y="${round2(y0)}" width="${round2(w)}" height="${round2(h)}" fill="${colorOf(k, ki)}">` +
         `<title>${esc(c.label)} ${esc(k)}: ${esc(fmtY(share))}</title></rect>`;
     });
     g += axisText(x + w / 2, H - 10, 'middle', c.label);
@@ -389,7 +444,7 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
     pick(columns, a.index, 'index'); pick(keys, a.series ?? 0, 'series');
     return [L + a.index * bw + bw * 0.5, tops[a.index][a.series ?? 0]];
   });
-  return svg(W, height, f.deco + g, lab);
+  return svg(W, height, deco + g, lab);
 }
 
 export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, niceTicks, svg, esc, fin, palette };

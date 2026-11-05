@@ -213,3 +213,60 @@ test('lineChart: callout goes to the top band when nothing inside the plot is cl
   calloutClearsTarget(out);
   assert.match(out, /<polyline fill="none" stroke="var\(--chart-ink[^"]*" stroke-width="1" points="/, 'thin leader to the point');
 });
+
+// 11. Legend, colour map and line value labels.
+const topGrid = out => Math.min(...[...out.matchAll(/<line x1="\d+" x2="\d+" y1="([\d.]+)" y2="[\d.]+" stroke="var\(--chart-grid/g)].map(m => +m[1]));
+
+test('legend: names present and the plot top moves down by the legend height', () => {
+  for (const [name, opts] of [['lineChart', fixtures.lineChart], ['scatter', fixtures.scatter], ['stackedBars', fixtures.stackedBars]]) {
+    const plain = charts[name](opts), withLegend = charts[name]({ ...opts, legend: true });
+    const names = name === 'stackedBars' ? opts.keys : (opts.series || opts.groups).map(s => s.name);
+    for (const n of names) assert.ok(withLegend.includes(`>${n}</text>`), `${name}: legend names ${n}`);
+    assert.equal(topGrid(withLegend), topGrid(plain) + 18, `${name}: one legend row is 18px`);
+  }
+  const db = charts.dumbbell({ ...fixtures.dumbbell, legend: true });
+  assert.ok(db.includes('>April</text>') && db.includes('>June</text>'), 'dumbbell legend names both ends');
+  assert.ok(db.includes('viewBox="0 0 600 176"'), 'dumbbell grows by the legend row');
+});
+
+test('legend wraps to a second row when wider than the chart', () => {
+  const series = Array.from({ length: 6 }, (_, i) => ({ name: 'Series ' + i, points: [{ x: 'Jan', y: i + 1 }] }));   // 6 x 94px in 400px: two rows
+  const out = charts.lineChart({ label: 'x', labels: ['Jan'], series, legend: true, width: 400 });
+  assert.equal(topGrid(out), topGrid(charts.lineChart({ label: 'x', labels: ['Jan'], series, width: 400 })) + 2 * 16 + 2);
+});
+
+test('legend on barChart only when items name a series', () => {
+  const plain = charts.barChart(fixtures.barChart);
+  assert.equal(charts.barChart({ ...fixtures.barChart, legend: true }), plain, 'no series: legend ignored');
+  const data = fixtures.barChart.data.map((d, i) => ({ ...d, series: i % 2 ? 'Product B' : 'Product A' }));
+  const out = charts.barChart({ ...fixtures.barChart, data, legend: true });
+  assert.ok(out.includes('>Product A</text>') && out.includes('>Product B</text>'));
+  assert.equal(topGrid(out), topGrid(plain) + 18);
+  const fills = [...out.matchAll(/<rect [^>]*rx="3" fill="([^"]*)"/g)].map(m => m[1]);
+  assert.equal(fills[0], fills[2], 'items of one series share a colour');
+  assert.notEqual(fills[0], fills[1]);
+});
+
+test('colors maps one name to one fill across builders', () => {
+  const colors = { 'Product A': '#ff0000', 'Product B': '#00ff00' };
+  const bar = charts.barChart({ label: 'x', data: [{ label: 'Product B', value: 2 }, { label: 'Product A', value: 1 }], colors });
+  const stacked = charts.stackedBars({ label: 'x', keys: ['Product B', 'Product A'], colors, columns: [{ label: 'Q1', parts: { 'Product A': 1, 'Product B': 1 } }] });
+  const line = charts.lineChart({ label: 'x', labels: ['Jan'], series: [{ name: 'Product A', points: [{ x: 'Jan', y: 1 }] }], colors });
+  const dots = charts.scatter({ label: 'x', groups: [{ name: 'Product A', points: [{ x: 1, y: 1 }] }], colors });
+  const rows = charts.dumbbell({ label: 'x', rows: [{ label: 'Product A', a: 1, b: 2 }], colors });
+  assert.ok(bar.includes('<rect x="') && bar.match(/rx="3" fill="#ff0000"/) && bar.match(/rx="3" fill="#00ff00"/), 'barChart by label');
+  assert.ok(stacked.match(/fill="#ff0000"><title>Q1 Product A/), 'stackedBars by key');
+  assert.ok(line.includes('stroke="#ff0000"'), 'lineChart by series name');
+  assert.ok(dots.includes('fill="#ff0000"'), 'scatter by group name');
+  assert.ok(rows.includes('stroke="#ff0000"'), 'dumbbell by row label');
+  const explicit = charts.barChart({ label: 'x', data: [{ label: 'Product A', value: 1, color: '#0000ff' }], colors });
+  assert.ok(explicit.includes('rx="3" fill="#0000ff"'), 'an explicit item color wins over the map');
+});
+
+test('lineChart valueLabels: one 11px bold label per point, overlapping ones skipped', () => {
+  const out = charts.lineChart({ ...fixtures.lineChart, valueLabels: true });
+  const labels = [...out.matchAll(/<text x="[\d.]+" y="[\d.]+" text-anchor="(?:start|middle|end)" font-size="11" fill="[^"]*" font-weight="700">([^<]*)</g)].map(m => m[1]);
+  assert.ok(labels.includes('$205k') && labels.includes('$120k'), 'labels use fmtY');
+  assert.ok(labels.length < 12 && labels.length >= 6, `overlapping labels are skipped, most stay (${labels.length} of 12)`);
+  assert.ok(!charts.lineChart(fixtures.lineChart).includes('font-size="11"'), 'off by default');
+});

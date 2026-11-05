@@ -57,6 +57,9 @@ options:
 | `unit` | unit of the values, drawn after the title as `Title · unit` in `--chart-axis-text` |
 | `source` | data source, bottom-left, 10px, drawn as `Source: ...` |
 | `annotations` | callouts: `[{ index, series?, text }]` for category charts, `[{ x, y, text }]` for `scatter` |
+| `legend` | `true` draws a legend row under the title (series, groups, stacked keys, dumbbell ends; bar-type charts only when items name a `series`) |
+| `colors` | `{ name: colour }` applied by series name, item label, stacked key, group name or row label; beats the palette, not an explicit `color` |
+| `valueLabels` | `lineChart` only: `true` writes an 11px bold value above each point and skips labels that would overlap |
 
 | Builder | Shape of data | Use for |
 |---|---|---|
@@ -101,6 +104,29 @@ crosses the number. The point is located per builder:
 
 An `index` or `series` outside the data throws a `RangeError`; a callout never
 disappears silently.
+
+## Legend, one colour per name, value labels
+
+`legend: true` lists the series (`lineChart`), groups (`scatter`), keys
+(`stackedBars`) or the two ends (`dumbbell`, hollow marker for `aLabel`, filled
+for `bLabel`) in a 16px row under the title band, with a 14x3 swatch and the
+name. The row wraps when the names are wider than the chart, and the plot
+shrinks by the rows used. `barChart`, `waterfall` and `divergingBars` draw a
+legend only when their items carry a `series` name; items of one series share
+a colour.
+
+`colors` keeps one colour per name across a whole deck: pass the same
+`{ 'Product A': '#2a78d6', ... }` object to every chart and each builder looks
+up its series name, item label, stacked key, group name or row label in it. An
+explicit per-item `color` still wins. `stackedBars` accepts either this object
+or the older array by key position.
+
+```js
+const colors = { 'Product A': '#2a78d6', 'Product B': '#d98500' };
+lineChart({ series: [{ name: 'Product A', points }], legend: true, colors, valueLabels: true });
+barChart({ data: [{ label: 'Q1', value: 12, series: 'Product A' }, { label: 'Q2', value: 9, series: 'Product B' }], legend: true, colors });
+stackedBars({ keys: ['Product A', 'Product B'], columns, legend: true, colors });
+```
 
 ```js
 barChart({

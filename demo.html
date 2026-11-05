@@ -44,6 +44,7 @@ OS between light and dark to see the theme follow.</p>
 <div class="card"><h2>dumbbell</h2><div id="db"></div></div>
 <div class="card"><h2>stackedBars</h2><div id="st"></div></div>
 <div class="card"><h2>title, unit, source and a callout</h2><div id="framed"></div></div>
+<div class="card"><h2>legend, one colour per name, value labels</h2><div id="legend"></div><div id="legend2"></div></div>
 
 <script type="module">
 import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars } from './charts.js';
@@ -114,6 +115,23 @@ document.getElementById('framed').innerHTML = lineChart({
   labels: months, fmtY: v => '$' + v,
   series: [{ name: 'Cost per order', points: months.map((m,i)=>({x:m,y:[58,55,61,49,44,41][i]})) }],
   annotations: [{ index: 2, text: 'carrier switch' }, { index: 5, text: 'quarter low' }],
+});
+
+// One colours object shared by every chart keeps Product A blue and Product B orange throughout.
+const colors = { 'Product A': 'var(--chart-1)', 'Product B': 'var(--chart-4)' };
+document.getElementById('legend').innerHTML = lineChart({
+  title: 'Orders by product', unit: 'orders', legend: true, colors, valueLabels: true, labels: months,
+  series: [
+    { name: 'Product A', points: months.map((m,i)=>({x:m,y:[410,460,440,520,580,610][i]})) },
+    { name: 'Product B', points: months.map((m,i)=>({x:m,y:[150,170,220,210,260,300][i]})) },
+  ],
+});
+document.getElementById('legend2').innerHTML = barChart({
+  title: 'Orders by channel', unit: 'orders', legend: true, colors,
+  data: [
+    { label: 'Search', value: 1240, series: 'Product A' }, { label: 'Social', value: 860, series: 'Product B' },
+    { label: 'Email', value: 640, series: 'Product A' }, { label: 'Direct', value: 980, series: 'Product B' },
+  ],
 });
 </script>
 </div>
