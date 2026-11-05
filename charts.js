@@ -44,8 +44,14 @@ const PALETTE = ['var(--chart-1,#2a78d6)', 'var(--chart-2,#0ca37a)', 'var(--char
   'var(--chart-4,#d98500)', 'var(--chart-5,#d03b3b)'];
 export const palette = i => PALETTE[i % PALETTE.length];
 
-const axisText = (x, y, anchor, t, extra = '') =>
-  `<text x="${round2(x)}" y="${round2(y)}" text-anchor="${anchor}" font-size="12" fill="${AXIS}" ${extra}>${esc(t)}</text>`;
+// Axis-style text. `extra` holds attribute overrides (fill, font-size, font-weight);
+// each name appears once in the output, with the override winning.
+const axisText = (x, y, anchor, t, extra = '') => {
+  const attrs = { 'font-size': '12', fill: AXIS };
+  for (const m of extra.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[m[1]] = m[2];
+  return `<text x="${round2(x)}" y="${round2(y)}" text-anchor="${anchor}" ` +
+    Object.entries(attrs).map(([k, v]) => `${k}="${v}"`).join(' ') + `>${esc(t)}</text>`;
+};
 
 // Title, unit and source frame. The top band (22px) holds "Title · unit" and the
 // bottom band (16px) holds "Source: ...". Builders add the bands to their own
@@ -64,22 +70,29 @@ function frame({ title, unit, source, H }) {
 
 // Text width estimate (a string builder has no font metrics): 0.6em per character.
 const textW = (s, fs) => String(s).length * fs * 0.6;
-// Box of a right-anchored 12px label whose baseline is at (x, y); used to keep callouts off the target label.
-const labelBox = (x, y, text) => ({ x0: x - textW(text, 12), x1: x, y0: y - 12, y1: y + 3 });
-// True when box a touches box b or comes within 14px of it vertically.
-const nearBox = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 + 14 && a.y1 > b.y0 - 14;
+// Box of a text label with its baseline at (x, y). `m` is the clearance a callout
+// keeps from it: 14px for the target label, 2px for value labels.
+function labelBox(x, y, text, anchor = 'end', fs = 12, m = 14) {
+  const w = textW(text, fs), x0 = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x;
+  return { x0, x1: x0 + w, y0: y - fs, y1: y + 3, m };
+}
+// True when box a comes within b.m of box b.
+const nearBox = (a, b) => a.x0 < b.x1 + b.m && a.x1 > b.x0 - b.m && a.y0 < b.y1 + b.m && a.y1 > b.y0 - b.m;
 
 // One callout: a ring on the point, a leader, and the text. The text sits up and
 // to the right, or up and to the left (right-aligned to the point) when the point
 // is in the right 35% of the plot or the text would cross the plot's right edge.
-// It never overlaps a box in geo.avoid (the target label): it moves up in 16px
-// steps, or goes below the point when the top band leaves no room above.
-function callout(px, py, text, geo) {
+// It never overlaps a box in geo.avoid (target and value labels): it moves up in
+// 16px steps, or goes below the point when the top band leaves no room above.
+// When the point carries its own value label (`own`), the leader is an elbow that
+// runs sideways past that label and then up, so it never crosses the number.
+function callout(px, py, text, geo, own) {
   const { W, L, R, top = 0, bottom = Infinity, avoid = [] } = geo;
   const tw = textW(text, 12);
+  const reach = d => own ? (d > 0 ? Math.max(px + 17, own.x1 + 3) : Math.min(px - 17, own.x0 - 3)) : px + d * 17;
   let d = px > L + 0.65 * (W - L - R) ? -1 : 1;
-  if (d > 0 && px + 20 + tw > W - R) d = -1;
-  const x0 = d > 0 ? px + 20 : px - 20 - tw;
+  if (d > 0 && reach(1) + 3 + tw > W - R) d = -1;
+  const ex = reach(d), tx = ex + d * 3, x0 = d > 0 ? tx : tx - tw;
   const clear = base => !avoid.some(b => nearBox({ x0, x1: x0 + tw, y0: base - 12, y1: base + 3 }, b));
   let base = py - 13, below = false;
   while (!clear(base) && base - 28 >= top) base -= 16;
@@ -88,20 +101,22 @@ function callout(px, py, text, geo) {
     while (!clear(b2) && b2 + 19 <= bottom) b2 += 16;
     if (clear(b2)) { base = b2; below = true; }
   }
-  const y1 = below ? py + 4 : py - 4, y2 = below ? base - 5 : base - 4;
-  return `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` +
-    `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(px + d * 17)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>` +
-    `<text x="${round2(px + d * 20)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
+  const y1 = below ? py + 4 : py - 4, y2 = below ? base - 13 : base - 4;
+  const leader = own
+    ? `<polyline fill="none" stroke="${INK}" stroke-width="1.2" points="${round2(px + d * 5)},${round2(py)} ${round2(ex)},${round2(py)} ${round2(ex)},${round2(y2)}"/>`
+    : `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(ex)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>`;
+  return `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` + leader +
+    `<text x="${round2(tx)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
 }
 
-// Resolve each annotation to a point through `locate(a)`, which returns [x, y]
-// or throws. A bad index is an error, not a missing callout.
+// Resolve each annotation to a point through `locate(a)`, which returns
+// [x, y, ownLabelBox?] or throws. A bad index is an error, not a missing callout.
 // geo: { W, L, R, top, bottom, avoid } describes the plot for callout placement.
 function annotate(annotations, geo, locate) {
   return annotations.map((a, i) => {
     const pt = locate(a);
     if (!pt || !fin(pt[0]) || !fin(pt[1])) throw new RangeError(`annotation ${i} does not resolve to a point`);
-    return callout(pt[0], pt[1], a.text, geo);
+    return callout(pt[0], pt[1], a.text, geo, pt[2]);
   }).join('');
 }
 
@@ -173,7 +188,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
   let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
   const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
-  const bw = (W - L - R) / data.length;
+  const bw = (W - L - R) / data.length, avoid = [];
   let g = gridY(ticks, L, R, W, Y, fmtY);
   data.forEach((d, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, y = Y(Math.max(0, d.value)), h = Math.max(1, Math.abs(Y(d.value) - Y(0)));
@@ -181,9 +196,9 @@ export function barChart({ data = [], label, width = 600, height = 260,
     g += `<rect x="${round2(x)}" y="${round2(y)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
       `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
     g += axisText(x + w / 2, y - 5, 'middle', fmtY(d.value), `fill="${INK}" font-weight="600"`);
+    avoid.push(labelBox(x + w / 2, y - 5, fmtY(d.value), 'middle', 12, 2));
     g += axisText(x + w / 2, H - 12, 'middle', d.label);
   });
-  const avoid = [];
   if (target != null && fin(target)) {
     const tl = 'target ' + fmtY(target);
     g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
@@ -192,7 +207,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
   }
   g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
     const d = pick(data, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value))];
+    return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index]];
   });
   return svg(W, height, f.deco + g, lab);
 }
@@ -211,22 +226,24 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
   if (!bars.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   let ymax = Math.max(...bars.map(b => Math.max(b.from, b.to))) * 1.12;
   const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
-  const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
+  const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B), avoid = [];
   let g = gridY(ticks, L, R, W, Y, fmtY);
   bars.forEach((b, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, top = Y(Math.max(b.from, b.to)), h = Math.max(1, Math.abs(Y(b.from) - Y(b.to)));
     const col = b.kind === 'total' ? 'var(--chart-total,#8d979d)' : b.kind === 'down' ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#d03b3b)';
     const val = b.kind === 'total' ? fmtY(b.to) : (b.delta < 0 ? '−' : '+') + fmtY(Math.abs(b.delta));
+    const fs = bw < 90 ? 11 : 13;
     g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
       `<title>${esc(b.name)}: ${esc(val)}</title></rect>`;
-    g += axisText(x + w / 2, top - 5, 'middle', val, `fill="${INK}" font-weight="600" font-size="${bw < 90 ? 11 : 13}"`);
-    const words = String(b.name).split(' '), fs = bw < 90 ? 11 : 13;
+    g += axisText(x + w / 2, top - 5, 'middle', val, `fill="${INK}" font-weight="600" font-size="${fs}"`);
+    avoid.push(labelBox(x + w / 2, top - 5, val, 'middle', fs, 2));
+    const words = String(b.name).split(' ');
     g += axisText(x + w / 2, H - 28, 'middle', words[0], `font-size="${fs}"`);
     if (words.length > 1) g += axisText(x + w / 2, H - 13, 'middle', words.slice(1).join(' '), `font-size="${fs}"`);
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
     const b = pick(bars, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to))];
+    return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to)), avoid[a.index]];
   });
   return svg(W, height, f.deco + g, lab);
 }
@@ -273,19 +290,21 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
   const Y = v => Tp + (1 - (v - tmin) / (tmax - tmin)) * (H - Tp - B);
   let g = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${round2(Y(t))}" y2="${round2(Y(t))}" ` +
     `stroke="${t === 0 ? INK : GRID}" stroke-width="${t === 0 ? 1.4 : 1}"/>` + axisText(L - 6, Y(t) + 4, 'end', fmtY(t))).join('');
-  const bw = (W - L - R) / data.length, zero = Y(0);
+  const bw = (W - L - R) / data.length, zero = Y(0), avoid = [];
   data.forEach((d, i) => {
     const x = L + i * bw + bw * 0.16, w = bw * 0.68, yv = Y(d.value);
     const top = Math.min(zero, yv), h = Math.max(1, Math.abs(yv - zero));
     const col = d.color || (d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)');
+    const val = (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), vy = d.value >= 0 ? top - 5 : top + h + 13;
     g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
-      `<title>${esc(d.label)}: ${esc((d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)))}</title></rect>`;
-    g += axisText(x + w / 2, d.value >= 0 ? top - 5 : top + h + 13, 'middle', (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), `fill="${INK}" font-weight="600" font-size="11"`);
+      `<title>${esc(d.label)}: ${esc(val)}</title></rect>`;
+    g += axisText(x + w / 2, vy, 'middle', val, `fill="${INK}" font-weight="600" font-size="11"`);
+    avoid.push(labelBox(x + w / 2, vy, val, 'middle', 11, 2));
     g += axisText(x + w / 2, H - 4, 'middle', d.label, `font-size="11"`);
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
     const d = pick(data, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(d.value)];
+    return [L + a.index * bw + bw * 0.5, Y(d.value), avoid[a.index]];
   });
   return svg(W, height, f.deco + g, lab);
 }

@@ -66,7 +66,7 @@ test('annotation index out of range throws', () => {
 //    right edge just under the target, with a long text.
 const CHAR = 12 * 0.6;   // the width estimate charts.js uses for 12px text
 function calloutClearsTarget(out) {
-  const tl = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="end" font-size="12" fill="[^"]*" fill="var\(--chart-target[^>]*>(target [^<]*)</);
+  const tl = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="end" font-size="12" fill="var\(--chart-target[^>]*>(target [^<]*)</);
   const ct = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(start|end)" font-size="12" font-weight="700"[^>]*>([^<]*)</);
   assert.ok(tl && ct, 'target label and callout text found');
   const labelX0 = +tl[1] - tl[3].length * CHAR, labelY0 = +tl[2] - 12, labelY1 = +tl[2] + 3;
@@ -102,3 +102,60 @@ test('callout flips left when the text would cross the right edge', () => {
     annotations: [{ index: 2, text: 'a very long callout text for the last bar' }] });
   assert.match(out, /text-anchor="end" font-size="12" font-weight="700"/);
 });
+
+// 8. Callouts never sit over a value label (the bold number above each bar).
+test('barChart: callout text clears the value labels and the target label', () => {
+  const out = charts.barChart({
+    label: 'x', target: 1000, data: [{ label: 'A', value: 700 }, { label: 'B', value: 800 }, { label: 'C', value: 960 }],
+    annotations: [{ index: 2, text: 'just under target' }, { index: 0, text: 'low' }],
+  });
+  calloutClearsTarget(out);
+  const labels = [...out.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="(\d+)" fill="[^"]*" font-weight="600">([^<]*)</g)]
+    .map(m => { const w = m[4].length * +m[3] * 0.6; return { x0: +m[1] - w / 2, x1: +m[1] + w / 2, y0: +m[2] - +m[3], y1: +m[2] + 3, text: m[4] }; });
+  assert.equal(labels.length, 3, 'three value labels');
+  for (const m of out.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(start|end)" font-size="12" font-weight="700"[^>]*>([^<]*)</g)) {
+    const w = m[4].length * CHAR, x0 = m[3] === 'end' ? +m[1] - w : +m[1];
+    const box = { x0, x1: x0 + w, y0: +m[2] - 12, y1: +m[2] + 3 };
+    for (const l of labels) {
+      const overlap = box.x0 < l.x1 && box.x1 > l.x0 && box.y0 < l.y1 && box.y1 > l.y0;
+      assert.ok(!overlap, `callout "${m[4]}" overlaps value label "${l.text}"`);
+    }
+  }
+  // The elbow leader runs sideways below the number and then up outside it.
+  const leaders = [...out.matchAll(/<polyline fill="none" stroke="var\(--chart-ink[^"]*" stroke-width="1.2" points="([^"]*)"/g)]
+    .map(m => m[1].split(' ').map(p => p.split(',').map(Number)));
+  assert.equal(leaders.length, 2, 'two elbow leaders');
+  for (const [[, sy], [ex, ey], [vx]] of leaders) {
+    assert.equal(ex, vx, 'the second segment is vertical');
+    for (const l of labels) {
+      const horizontalCrosses = sy === ey && sy > l.y0 && sy < l.y1 && Math.min(ex, vx) < l.x1 && Math.max(ex, vx) > l.x0;
+      const verticalCrosses = vx > l.x0 && vx < l.x1;
+      assert.ok(!horizontalCrosses && !verticalCrosses, `leader crosses value label "${l.text}"`);
+    }
+  }
+});
+
+// 9. Well-formed attributes: no element repeats an attribute name. Checked on
+//    every builder, plain and with all four options.
+const withOptions = { title: 'T', unit: 'u', source: 'S' };
+const annotated = {
+  lineChart: [{ index: 1, series: 1, text: 'a' }], barChart: [{ index: 1, text: 'a' }], waterfall: [{ index: 1, text: 'a' }],
+  scatter: [{ x: 12000, y: 300, text: 'a' }], divergingBars: [{ index: 3, text: 'a' }], dumbbell: [{ index: 0, series: 1, text: 'a' }],
+  stackedBars: [{ index: 2, series: 1, text: 'a' }],
+};
+function assertUniqueAttributes(out, where) {
+  const tags = [...out.matchAll(/<([a-zA-Z][\w:-]*)((?:\s+[\w:-]+="[^"]*")*)\s*\/?>/g)];
+  assert.ok(tags.length > 0, `${where}: tags found`);
+  assert.equal((out.match(/<[a-zA-Z]/g) || []).length, tags.length, `${where}: every opening tag parses as name plus quoted attributes`);
+  for (const [, name, attrs] of tags) {
+    const names = [...attrs.matchAll(/([\w:-]+)=/g)].map(m => m[1]);
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    assert.ok(!dup, `${where}: <${name}> repeats attribute ${dup}`);
+  }
+}
+for (const name of Object.keys(fixtures)) {
+  test(`${name}: no element repeats an attribute`, () => {
+    assertUniqueAttributes(charts[name](fixtures[name]), name);
+    assertUniqueAttributes(charts[name]({ ...fixtures[name], ...withOptions, annotations: annotated[name] }), name + ' with options');
+  });
+}
