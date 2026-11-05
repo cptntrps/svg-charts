@@ -65,7 +65,16 @@ function frame({ title, unit, source, H }) {
     deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${title != null ? esc(title) : ''}${u}</text>`;
   }
   if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(source)}</text>`;
-  return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco };
+  const titleLine = (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '');
+  return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco,
+    titleBox: hasTop ? labelBox(4, 15, titleLine, 'start', 14, 0) : null };
+}
+
+// Builders draw their body twice when a band callout needs its own row under the
+// title: the second pass shrinks the plot by that row (band.need is set in pass one).
+function twoPass(body, band) {
+  const g = body(0);
+  return band.need ? body(LEGEND_ROW) : g;
 }
 
 // Colour of a named item: explicit `color` first, then the `colors` map by name,
@@ -126,10 +135,16 @@ function nearBox(a, b) {
 // it moves up in 16px steps, then tries below the point, and when nothing inside
 // the plot is clear it goes to the band above the plot (right-aligned, on the
 // title row) with a thin leader down to the point.
+// In the band the text never overprints the title line: when it would, the
+// callout takes a second band row under the title (band.need asks the builder for
+// the row; extraTop > 0 means the row exists). `ringOnly` draws the ring alone,
+// for an annotation whose text repeats the value label already on the point.
 // When the point carries its own value label (`own`), the leader is an elbow that
 // runs sideways past that label and then up, so it never crosses the number.
-function callout(px, py, text, geo, own) {
-  const { W, L, R, top = 0, plotTop = top, bottom = Infinity, avoid = [] } = geo;
+function callout(px, py, text, geo, own, ringOnly = false) {
+  const { W, L, R, top = 0, plotTop = top, bottom = Infinity, avoid = [], title = null, extraTop = 0, band = {} } = geo;
+  const ring = `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>`;
+  if (ringOnly) return ring;
   const tw = textW(text, 12);
   const reach = d => own ? (d > 0 ? Math.max(px + 17, own.x1 + 3) : Math.min(px - 17, own.x0 - 3)) : px + d * 17;
   let d = px > L + 0.65 * (W - L - R) ? -1 : 1;
@@ -137,17 +152,20 @@ function callout(px, py, text, geo, own) {
   const ex = reach(d);
   let tx = ex + d * 3, x0 = d > 0 ? tx : tx - tw;
   const clear = base => !avoid.some(b => nearBox({ x0, x1: x0 + tw, y0: base - 12, y1: base + 3 }, b));
-  let base = py - 13, below = false, band = false;
+  let base = py - 13, below = false, inBand = false;
   while (!clear(base) && base - 28 >= plotTop) base -= 16;
   if (!clear(base)) {
     let b2 = py + 22;
     while (!clear(b2) && b2 + 19 <= bottom) b2 += 16;
     if (clear(b2)) { base = b2; below = true; }
-    else { band = true; d = -1; base = top > 0 ? 15 : plotTop - 2; tx = W - 4; x0 = tx - tw; }
+    else {
+      inBand = true; d = -1; tx = W - 4; x0 = tx - tw; base = top > 0 ? 15 : plotTop - 2;
+      if (title && x0 < title.x1 + 8) { if (extraTop > 0) base = 15 + LEGEND_ROW; else band.need = true; }
+    }
   }
   const y1 = below ? py + 4 : py - 4, y2 = below ? base - 13 : base - 4;
   let leader;
-  if (band) {
+  if (inBand) {
     const kx = px < x0 ? x0 - 3 : px > tx ? tx + 3 : px, ky = base + 5;
     leader = `<polyline fill="none" stroke="${INK}" stroke-width="1" points="${round2(px)},${round2(py - 5)} ${round2(px)},${round2(ky)}` +
       (kx !== px ? ` ${round2(kx)},${round2(ky)}` : '') + `"/>`;
@@ -156,18 +174,19 @@ function callout(px, py, text, geo, own) {
   } else {
     leader = `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(ex)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>`;
   }
-  return `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` + leader +
+  return ring + leader +
     `<text x="${round2(tx)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
 }
 
 // Resolve each annotation to a point through `locate(a)`, which returns
-// [x, y, ownLabelBox?] or throws. A bad index is an error, not a missing callout.
-// geo: { W, L, R, top, bottom, avoid } describes the plot for callout placement.
+// [x, y, ownLabelBox?, valueText?] or throws. A bad index is an error, not a
+// missing callout. An annotation whose text equals the value label already drawn
+// on that point keeps only the ring. geo describes the plot for callout placement.
 function annotate(annotations, geo, locate) {
   return annotations.map((a, i) => {
     const pt = locate(a);
     if (!pt || !fin(pt[0]) || !fin(pt[1])) throw new RangeError(`annotation ${i} does not resolve to a point`);
-    return callout(pt[0], pt[1], a.text, geo, pt[2]);
+    return callout(pt[0], pt[1], a.text, geo, pt[2], pt[3] != null && String(a.text) === String(pt[3]));
   }).join('');
 }
 
@@ -188,55 +207,58 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
   target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'line chart';
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
-  const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], width, f.top);
-  const deco = f.deco + lg.svg;
-  const L = 54, R = 16, Tp = 14 + f.top + lg.height, B = 34, W = width, H = height - f.bottom;
-  const ys = series.flatMap(s => s.points.map(p => p.y)).filter(fin);
-  if (!ys.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  let ymax = Math.max(...ys) * 1.1;
-  const tIn = target != null && fin(target) && target <= ymax * 2;
-  if (tIn) ymax = Math.max(ymax, target * 1.1);
-  const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
-  const X = i => L + (labels.length < 2 ? 0 : i * (W - L - R) / (labels.length - 1));
-  const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
-  let g = gridY(ticks, L, R, W, Y, fmtY);
-  const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
-  g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
-    ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
-  const avoid = [], placed = [];
-  series.forEach((s, si) => {
-    const col = colorOf(s, si);
-    const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
-    g += `<polyline fill="none" stroke="${col}" stroke-width="2.4" stroke-dasharray="${s.dash || ''}" ` +
-      `points="${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')}"/>`;
-    g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
-      `<title>${esc(s.name)} ${esc(labels[p[0]])}: ${esc(fmtY(p[1]))}</title></circle>`).join('');
-    for (let i = 1; i < pts.length; i++) avoid.push(segment(X(pts[i - 1][0]), Y(pts[i - 1][1]), X(pts[i][0]), Y(pts[i][1])));
-    if (valueLabels) pts.forEach(p => {        // one 11px label above each point; a label that would overlap an earlier one is skipped
-      const t = fmtY(p[1]), anchor = p[0] === 0 ? 'start' : p[0] === labels.length - 1 ? 'end' : 'middle';
-      const box = labelBox(X(p[0]), Y(p[1]) - 7, t, anchor, 11, 2);
-      if (placed.some(b => nearBox(box, b))) return;
-      placed.push(box); avoid.push(box);
-      g += axisText(X(p[0]), Y(p[1]) - 7, anchor, t, `fill="${INK}" font-weight="700" font-size="11"`);
+  const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], band = {}, W = width;
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 54, R = 16, Tp = 14 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom;
+    const ys = series.flatMap(s => s.points.map(p => p.y)).filter(fin);
+    if (!ys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    let ymax = Math.max(...ys) * 1.1;
+    const tIn = target != null && fin(target) && target <= ymax * 2;
+    if (tIn) ymax = Math.max(ymax, target * 1.1);
+    const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
+    const X = i => L + (labels.length < 2 ? 0 : i * (W - L - R) / (labels.length - 1));
+    const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
+    let g = gridY(ticks, L, R, W, Y, fmtY);
+    const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
+    g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
+      ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
+    const avoid = [], placed = [], placedText = new Map();
+    series.forEach((s, si) => {
+      const col = colorOf(s, si);
+      const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
+      g += `<polyline fill="none" stroke="${col}" stroke-width="2.4" stroke-dasharray="${s.dash || ''}" ` +
+        `points="${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')}"/>`;
+      g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
+        `<title>${esc(s.name)} ${esc(labels[p[0]])}: ${esc(fmtY(p[1]))}</title></circle>`).join('');
+      for (let i = 1; i < pts.length; i++) avoid.push(segment(X(pts[i - 1][0]), Y(pts[i - 1][1]), X(pts[i][0]), Y(pts[i][1])));
+      if (valueLabels) pts.forEach(p => {        // one 11px label above each point; a label that would overlap an earlier one is skipped
+        const t = fmtY(p[1]), anchor = p[0] === 0 ? 'start' : p[0] === labels.length - 1 ? 'end' : 'middle';
+        const box = labelBox(X(p[0]), Y(p[1]) - 7, t, anchor, 11, 2);
+        if (placed.some(b => nearBox(box, b))) return;
+        placed.push(box); avoid.push(box); placedText.set(si + ':' + p[0], t);
+        g += axisText(X(p[0]), Y(p[1]) - 7, anchor, t, `fill="${INK}" font-weight="700" font-size="11"`);
+      });
     });
-  });
-  if (target != null && fin(target)) {
-    const tl = 'target ' + fmtY(target);
-    if (tIn) {
-      g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
-        `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
-      avoid.push(labelBox(W - R, Y(target) - 5, tl));
-    } else {
-      g += axisText(W - R, Tp + 4, 'end', tl + ' is above the chart', `fill="${TGT}"`);
-      avoid.push(labelBox(W - R, Tp + 4, tl + ' is above the chart'));
+    if (target != null && fin(target)) {
+      const tl = 'target ' + fmtY(target);
+      if (tIn) {
+        g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
+          `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
+        avoid.push(labelBox(W - R, Y(target) - 5, tl));
+      } else {
+        g += axisText(W - R, Tp + 4, 'end', tl + ' is above the chart', `fill="${TGT}"`);
+        avoid.push(labelBox(W - R, Tp + 4, tl + ' is above the chart'));
+      }
     }
-  }
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
-    const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
-    const p = s.points.find(p => p.x === x);
-    return p && [X(a.index), Y(p.y)];
-  });
-  return svg(W, height, deco + g, lab);
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
+      const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
+      const p = s.points.find(p => p.x === x);
+      return p && [X(a.index), Y(p.y), undefined, placedText.get((a.series ?? 0) + ':' + a.index)];
+    });
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 // ---------- vertical bar chart ----------
@@ -245,37 +267,41 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
 export function barChart({ data = [], label, width = 600, height = 260,
   target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'bar chart';
-  const groups = seriesLegend(data, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
+  const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
   const colorOf = (d, i) => pickColor(d.color, colors, [d.label, d.series],
     d.series != null ? groups.find(e => e.name === d.series).color : palette(i));
-  const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 34, W = width, H = height - f.bottom;
-  const vals = data.map(d => d.value).filter(fin);
-  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
-  const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
-  const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
-  const bw = (W - L - R) / data.length, avoid = [];
-  let g = gridY(ticks, L, R, W, Y, fmtY);
-  data.forEach((d, i) => {
-    const x = L + i * bw + bw * 0.16, w = bw * 0.68, y = Y(Math.max(0, d.value)), h = Math.max(1, Math.abs(Y(d.value) - Y(0)));
-    const col = colorOf(d, i);
-    g += `<rect x="${round2(x)}" y="${round2(y)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
-      `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
-    g += axisText(x + w / 2, y - 5, 'middle', fmtY(d.value), `fill="${INK}" font-weight="600"`);
-    avoid.push(labelBox(x + w / 2, y - 5, fmtY(d.value), 'middle', 12, 2));
-    g += axisText(x + w / 2, H - 12, 'middle', d.label);
-  });
-  if (target != null && fin(target)) {
-    const tl = 'target ' + fmtY(target);
-    g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
-      `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
-    avoid.push(labelBox(W - R, Y(target) - 5, tl));
-  }
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
-    const d = pick(data, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index]];
-  });
-  return svg(W, height, deco + g, lab);
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 54, R = 14, Tp = 16 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom;
+    const vals = data.map(d => d.value).filter(fin);
+    if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
+    const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
+    const Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
+    const bw = (W - L - R) / data.length, avoid = [];
+    let g = gridY(ticks, L, R, W, Y, fmtY);
+    data.forEach((d, i) => {
+      const x = L + i * bw + bw * 0.16, w = bw * 0.68, y = Y(Math.max(0, d.value)), h = Math.max(1, Math.abs(Y(d.value) - Y(0)));
+      const col = colorOf(d, i);
+      g += `<rect x="${round2(x)}" y="${round2(y)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
+        `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
+      g += axisText(x + w / 2, y - 5, 'middle', fmtY(d.value), `fill="${INK}" font-weight="600"`);
+      avoid.push(labelBox(x + w / 2, y - 5, fmtY(d.value), 'middle', 12, 2));
+      g += axisText(x + w / 2, H - 12, 'middle', d.label);
+    });
+    if (target != null && fin(target)) {
+      const tl = 'target ' + fmtY(target);
+      g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
+        `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
+      avoid.push(labelBox(W - R, Y(target) - 5, tl));
+    }
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
+      const d = pick(data, a.index, 'index');
+      return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index], fmtY(d.value)];
+    });
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 // ---------- waterfall / bridge ----------
@@ -283,37 +309,41 @@ export function barChart({ data = [], label, width = 600, height = 260,
 export function waterfall({ items = [], label, width = 600, height = 290, fmtY = num,
   title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'waterfall';
-  const groups = seriesLegend(items, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
-  const L = 54, R = 10, Tp = 18 + f.top + lg.height, B = 46, W = width, H = height - f.bottom;
-  const bars = []; let run = 0;
-  for (const it of items) {
-    if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value, it }); run = it.value; }
-    else { bars.push({ name: it.label, from: run, to: run + it.value, kind: it.value < 0 ? 'down' : 'up', delta: it.value, it }); run += it.value; }
-  }
-  if (!bars.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  let ymax = Math.max(...bars.map(b => Math.max(b.from, b.to))) * 1.12;
-  const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
-  const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B), avoid = [];
-  let g = gridY(ticks, L, R, W, Y, fmtY);
-  bars.forEach((b, i) => {
-    const x = L + i * bw + bw * 0.16, w = bw * 0.68, top = Y(Math.max(b.from, b.to)), h = Math.max(1, Math.abs(Y(b.from) - Y(b.to)));
-    const kindCol = b.kind === 'total' ? 'var(--chart-total,#8d979d)' : b.kind === 'down' ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#d03b3b)';
-    const col = pickColor(b.it.color, colors, [b.name, b.it.series], b.it.series != null ? groups.find(e => e.name === b.it.series).color : kindCol);
-    const val = b.kind === 'total' ? fmtY(b.to) : (b.delta < 0 ? '−' : '+') + fmtY(Math.abs(b.delta));
-    const fs = bw < 90 ? 11 : 13;
-    g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
-      `<title>${esc(b.name)}: ${esc(val)}</title></rect>`;
-    g += axisText(x + w / 2, top - 5, 'middle', val, `fill="${INK}" font-weight="600" font-size="${fs}"`);
-    avoid.push(labelBox(x + w / 2, top - 5, val, 'middle', fs, 2));
-    const words = String(b.name).split(' ');
-    g += axisText(x + w / 2, H - 28, 'middle', words[0], `font-size="${fs}"`);
-    if (words.length > 1) g += axisText(x + w / 2, H - 13, 'middle', words.slice(1).join(' '), `font-size="${fs}"`);
-  });
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
-    const b = pick(bars, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to)), avoid[a.index]];
-  });
-  return svg(W, height, deco + g, lab);
+  const groups = seriesLegend(items, colors), entries = legend ? groups : [], band = {}, W = width;
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 54, R = 10, Tp = 18 + f.top + extraTop + lg.height, B = 46, H = height - f.bottom;
+    const bars = []; let run = 0;
+    for (const it of items) {
+      if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value, it }); run = it.value; }
+      else { bars.push({ name: it.label, from: run, to: run + it.value, kind: it.value < 0 ? 'down' : 'up', delta: it.value, it }); run += it.value; }
+    }
+    if (!bars.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    let ymax = Math.max(...bars.map(b => Math.max(b.from, b.to))) * 1.12;
+    const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
+    const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B), avoid = [], valText = [];
+    let g = gridY(ticks, L, R, W, Y, fmtY);
+    bars.forEach((b, i) => {
+      const x = L + i * bw + bw * 0.16, w = bw * 0.68, top = Y(Math.max(b.from, b.to)), h = Math.max(1, Math.abs(Y(b.from) - Y(b.to)));
+      const kindCol = b.kind === 'total' ? 'var(--chart-total,#8d979d)' : b.kind === 'down' ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#d03b3b)';
+      const col = pickColor(b.it.color, colors, [b.name, b.it.series], b.it.series != null ? groups.find(e => e.name === b.it.series).color : kindCol);
+      const val = b.kind === 'total' ? fmtY(b.to) : (b.delta < 0 ? '−' : '+') + fmtY(Math.abs(b.delta));
+      const fs = bw < 90 ? 11 : 13;
+      g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
+        `<title>${esc(b.name)}: ${esc(val)}</title></rect>`;
+      g += axisText(x + w / 2, top - 5, 'middle', val, `fill="${INK}" font-weight="600" font-size="${fs}"`);
+      avoid.push(labelBox(x + w / 2, top - 5, val, 'middle', fs, 2)); valText.push(val);
+      const words = String(b.name).split(' ');
+      g += axisText(x + w / 2, H - 28, 'middle', words[0], `font-size="${fs}"`);
+      if (words.length > 1) g += axisText(x + w / 2, H - 13, 'middle', words.slice(1).join(' '), `font-size="${fs}"`);
+    });
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
+      const b = pick(bars, a.index, 'index');
+      return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to)), avoid[a.index], valText[a.index]];
+    });
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 // ---------- scatter (optional fitted line per group) ----------
@@ -322,30 +352,33 @@ export function scatter({ groups = [], label, width = 600, height = 330,
   xLabel = '', yLabel = '', fmtX = num, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'scatter';
   const colorOf = (gr, gi) => pickColor(gr.color, colors, [gr.name], palette(gi));
-  const lg = legendRows(legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], width, f.top);
-  const deco = f.deco + lg.svg;
-  const L = 54, R = 16, Tp = 22 + f.top + lg.height, B = 38, W = width, H = height - f.bottom;
-  const pts = groups.flatMap(g => g.points || []);
-  if (!pts.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  const xt = niceTicks(0, Math.max(...pts.map(p => p.x)) * 1.05), XM = xt[xt.length - 1] || 1;
-  const yt = niceTicks(0, Math.max(...pts.map(p => p.y)) * 1.08), YM = yt[yt.length - 1] || 1;
-  const X = v => L + v / XM * (W - L - R), Y = v => Tp + (1 - v / YM) * (H - Tp - B);
-  let g = gridY(yt, L, R, W, Y, fmtY);
-  g += xt.map((t, i) => axisText(X(t), H - 16, i === xt.length - 1 ? 'end' : 'middle', fmtX(t))).join('');
-  if (xLabel) g += axisText(W - R, H - 2, 'end', xLabel);
-  if (yLabel) g += axisText(L + 4, Tp + 10, 'start', yLabel, `font-weight="600"`);
-  groups.forEach((gr, gi) => {
-    const col = colorOf(gr, gi);
-    if (gr.line && typeof gr.line.fn === 'function') {
-      const n = 30, p = [];
-      for (let i = 0; i <= n; i++) { const x = gr.line.from + (gr.line.to - gr.line.from) * i / n; p.push(round2(X(x)) + ',' + round2(Y(gr.line.fn(x)))); }
-      g += `<polyline fill="none" stroke="${col}" stroke-width="1.8" stroke-dasharray="6 4" points="${p.join(' ')}"/>`;
-    }
-    g += (gr.points || []).map(p => `<circle cx="${round2(X(p.x))}" cy="${round2(Y(p.y))}" r="4.2" fill="${col}" fill-opacity=".85">` +
-      `<title>${esc(p.tip || (gr.name + ': ' + fmtX(p.x) + ', ' + fmtY(p.y)))}</title></circle>`).join('');
-  });
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
-  return svg(W, height, deco + g, lab);
+  const entries = legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], band = {}, W = width;
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 54, R = 16, Tp = 22 + f.top + extraTop + lg.height, B = 38, H = height - f.bottom;
+    const pts = groups.flatMap(g => g.points || []);
+    if (!pts.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    const xt = niceTicks(0, Math.max(...pts.map(p => p.x)) * 1.05), XM = xt[xt.length - 1] || 1;
+    const yt = niceTicks(0, Math.max(...pts.map(p => p.y)) * 1.08), YM = yt[yt.length - 1] || 1;
+    const X = v => L + v / XM * (W - L - R), Y = v => Tp + (1 - v / YM) * (H - Tp - B);
+    let g = gridY(yt, L, R, W, Y, fmtY);
+    g += xt.map((t, i) => axisText(X(t), H - 16, i === xt.length - 1 ? 'end' : 'middle', fmtX(t))).join('');
+    if (xLabel) g += axisText(W - R, H - 2, 'end', xLabel);
+    if (yLabel) g += axisText(L + 4, Tp + 10, 'start', yLabel, `font-weight="600"`);
+    groups.forEach((gr, gi) => {
+      const col = colorOf(gr, gi);
+      if (gr.line && typeof gr.line.fn === 'function') {
+        const n = 30, p = [];
+        for (let i = 0; i <= n; i++) { const x = gr.line.from + (gr.line.to - gr.line.from) * i / n; p.push(round2(X(x)) + ',' + round2(Y(gr.line.fn(x)))); }
+        g += `<polyline fill="none" stroke="${col}" stroke-width="1.8" stroke-dasharray="6 4" points="${p.join(' ')}"/>`;
+      }
+      g += (gr.points || []).map(p => `<circle cx="${round2(X(p.x))}" cy="${round2(Y(p.y))}" r="4.2" fill="${col}" fill-opacity=".85">` +
+        `<title>${esc(p.tip || (gr.name + ': ' + fmtX(p.x) + ', ' + fmtY(p.y)))}</title></circle>`).join('');
+    });
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 // ---------- diverging bars (change, positive and negative from zero) ----------
@@ -353,33 +386,37 @@ export function scatter({ groups = [], label, width = 600, height = 330,
 export function divergingBars({ data = [], label, width = 600, height = 280, fmtY = num,
   title, unit, source, annotations = [], legend = false, colors } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'change';
-  const groups = seriesLegend(data, colors), lg = legendRows(legend ? groups : [], width, f.top), deco = f.deco + lg.svg;
-  const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 20, W = width, H = height - f.bottom;
-  const vals = data.map(d => d.value).filter(fin);
-  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  const lo = Math.min(0, ...vals) * 1.12, hi = Math.max(0, ...vals) * 1.12;
-  const ticks = niceTicks(lo, hi); const tmin = ticks[0], tmax = ticks[ticks.length - 1] || 1;
-  const Y = v => Tp + (1 - (v - tmin) / (tmax - tmin)) * (H - Tp - B);
-  let g = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${round2(Y(t))}" y2="${round2(Y(t))}" ` +
-    `stroke="${t === 0 ? INK : GRID}" stroke-width="${t === 0 ? 1.4 : 1}"/>` + axisText(L - 6, Y(t) + 4, 'end', fmtY(t))).join('');
-  const bw = (W - L - R) / data.length, zero = Y(0), avoid = [];
-  data.forEach((d, i) => {
-    const x = L + i * bw + bw * 0.16, w = bw * 0.68, yv = Y(d.value);
-    const top = Math.min(zero, yv), h = Math.max(1, Math.abs(yv - zero));
-    const signCol = d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)';
-    const col = pickColor(d.color, colors, [d.label, d.series], d.series != null ? groups.find(e => e.name === d.series).color : signCol);
-    const val = (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), vy = d.value >= 0 ? top - 5 : top + h + 13;
-    g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
-      `<title>${esc(d.label)}: ${esc(val)}</title></rect>`;
-    g += axisText(x + w / 2, vy, 'middle', val, `fill="${INK}" font-weight="600" font-size="11"`);
-    avoid.push(labelBox(x + w / 2, vy, val, 'middle', 11, 2));
-    g += axisText(x + w / 2, H - 4, 'middle', d.label, `font-size="11"`);
-  });
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
-    const d = pick(data, a.index, 'index');
-    return [L + a.index * bw + bw * 0.5, Y(d.value), avoid[a.index]];
-  });
-  return svg(W, height, deco + g, lab);
+  const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 54, R = 14, Tp = 16 + f.top + extraTop + lg.height, B = 20, H = height - f.bottom;
+    const vals = data.map(d => d.value).filter(fin);
+    if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    const lo = Math.min(0, ...vals) * 1.12, hi = Math.max(0, ...vals) * 1.12;
+    const ticks = niceTicks(lo, hi); const tmin = ticks[0], tmax = ticks[ticks.length - 1] || 1;
+    const Y = v => Tp + (1 - (v - tmin) / (tmax - tmin)) * (H - Tp - B);
+    let g = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${round2(Y(t))}" y2="${round2(Y(t))}" ` +
+      `stroke="${t === 0 ? INK : GRID}" stroke-width="${t === 0 ? 1.4 : 1}"/>` + axisText(L - 6, Y(t) + 4, 'end', fmtY(t))).join('');
+    const bw = (W - L - R) / data.length, zero = Y(0), avoid = [], valText = [];
+    data.forEach((d, i) => {
+      const x = L + i * bw + bw * 0.16, w = bw * 0.68, yv = Y(d.value);
+      const top = Math.min(zero, yv), h = Math.max(1, Math.abs(yv - zero));
+      const signCol = d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)';
+      const col = pickColor(d.color, colors, [d.label, d.series], d.series != null ? groups.find(e => e.name === d.series).color : signCol);
+      const val = (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), vy = d.value >= 0 ? top - 5 : top + h + 13;
+      g += `<rect x="${round2(x)}" y="${round2(top)}" width="${round2(w)}" height="${round2(h)}" rx="3" fill="${col}">` +
+        `<title>${esc(d.label)}: ${esc(val)}</title></rect>`;
+      g += axisText(x + w / 2, vy, 'middle', val, `fill="${INK}" font-weight="600" font-size="11"`);
+      avoid.push(labelBox(x + w / 2, vy, val, 'middle', 11, 2)); valText.push(val);
+      g += axisText(x + w / 2, H - 4, 'middle', d.label, `font-size="11"`);
+    });
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
+      const d = pick(data, a.index, 'index');
+      return [L + a.index * bw + bw * 0.5, Y(d.value), avoid[a.index], valText[a.index]];
+    });
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 // ---------- dumbbell (two points per row, e.g. before vs after) ----------
@@ -389,29 +426,35 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
 export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel = 'B', fmtY = num,
   title, unit, source, annotations = [], legend = false, colors } = {}) {
   const plotH = Math.max(120, 16 + 28 + rows.length * 38), bandTop = title != null || unit != null ? TOP_BAND : 0;
-  const lg = legendRows(legend ? [{ name: aLabel, color: INK, marker: 'hollow' }, { name: bLabel, color: INK, marker: 'filled' }] : [], width, bandTop);
-  const f = frame({ title, unit, source, H: plotH + bandTop + lg.height + (source != null ? BOTTOM_BAND : 0) });
-  const lab = label ?? title ?? 'dumbbell', deco = f.deco + lg.svg;
-  const L = 150, R = 20, Tp = 16 + f.top + lg.height, B = 28, W = width, H = plotH + f.top + lg.height, height = H + f.bottom;
+  const entries = legend ? [{ name: aLabel, color: INK, marker: 'hollow' }, { name: bLabel, color: INK, marker: 'filled' }] : [];
+  const lab = label ?? title ?? 'dumbbell', W = width, band = {};
   const vals = rows.flatMap(r => [r.a, r.b]).filter(fin);
-  if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
-  const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
-  const rowH = (H - Tp - B) / rows.length;
-  let g = ticks.map(t => `<line x1="${round2(X(t))}" x2="${round2(X(t))}" y1="${Tp}" y2="${H - B}" stroke="${GRID}"/>` +
-    axisText(X(t), H - B + 16, 'middle', fmtY(t))).join('');
-  rows.forEach((r, i) => {
-    const y = Tp + (i + 0.5) * rowH, col = pickColor(r.color, colors, [r.label], palette(i));
-    g += axisText(L - 10, y + 4, 'end', r.label, `fill="${INK}"`);
-    g += `<line x1="${round2(X(r.a))}" x2="${round2(X(r.b))}" y1="${round2(y)}" y2="${round2(y)}" stroke="${col}" stroke-width="2"/>`;
-    g += `<circle cx="${round2(X(r.a))}" cy="${round2(y)}" r="5" fill="var(--chart-paper,#fff)" stroke="${col}" stroke-width="2"><title>${esc(r.label)} ${esc(aLabel)}: ${esc(fmtY(r.a))}</title></circle>`;
-    g += `<circle cx="${round2(X(r.b))}" cy="${round2(y)}" r="5" fill="${col}"><title>${esc(r.label)} ${esc(bLabel)}: ${esc(fmtY(r.b))}</title></circle>`;
-  });
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => {
-    const r = pick(rows, a.index, 'index'), s = pick([r.a, r.b], a.series ?? 0, 'series');
-    return [X(s), Tp + (a.index + 0.5) * rowH];
-  });
-  return svg(W, height, deco + g, lab);
+  // The body returns the whole svg: the height depends on the band row too.
+  const body = extraTop => {
+    const lg = legendRows(entries, W, bandTop + extraTop);
+    const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + (source != null ? BOTTOM_BAND : 0) });
+    const deco = f.deco + lg.svg;
+    const L = 150, R = 20, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + f.bottom;
+    if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+    const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
+    const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
+    const rowH = (H - Tp - B) / rows.length;
+    let g = ticks.map(t => `<line x1="${round2(X(t))}" x2="${round2(X(t))}" y1="${Tp}" y2="${H - B}" stroke="${GRID}"/>` +
+      axisText(X(t), H - B + 16, 'middle', fmtY(t))).join('');
+    rows.forEach((r, i) => {
+      const y = Tp + (i + 0.5) * rowH, col = pickColor(r.color, colors, [r.label], palette(i));
+      g += axisText(L - 10, y + 4, 'end', r.label, `fill="${INK}"`);
+      g += `<line x1="${round2(X(r.a))}" x2="${round2(X(r.b))}" y1="${round2(y)}" y2="${round2(y)}" stroke="${col}" stroke-width="2"/>`;
+      g += `<circle cx="${round2(X(r.a))}" cy="${round2(y)}" r="5" fill="var(--chart-paper,#fff)" stroke="${col}" stroke-width="2"><title>${esc(r.label)} ${esc(aLabel)}: ${esc(fmtY(r.a))}</title></circle>`;
+      g += `<circle cx="${round2(X(r.b))}" cy="${round2(y)}" r="5" fill="${col}"><title>${esc(r.label)} ${esc(bLabel)}: ${esc(fmtY(r.b))}</title></circle>`;
+    });
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B }, a => {
+      const r = pick(rows, a.index, 'index'), s = pick([r.a, r.b], a.series ?? 0, 'series');
+      return [X(s), Tp + (a.index + 0.5) * rowH];
+    });
+    return svg(W, height, deco + g, lab);
+  };
+  return twoPass(body, band);
 }
 
 // ---------- stacked bars (shares that sum per column) ----------
@@ -421,30 +464,34 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
   title, unit, source, annotations = [], legend = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'stacked';
   const colorOf = (k, ki) => (Array.isArray(colors) ? colors[ki] : colors[k]) || palette(ki);
-  const lg = legendRows(legend ? keys.map((k, ki) => ({ name: k, color: colorOf(k, ki) })) : [], width, f.top), deco = f.deco + lg.svg;
-  const L = 44, R = 14, Tp = 14 + f.top + lg.height, B = 30, W = width, H = height - f.bottom;
-  if (!columns.length || !keys.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
-  const totals = columns.map(c => keys.reduce((a, k) => a + (c.parts[k] || 0), 0));
-  const norm = columns.map((c, i) => totals[i] > 0 ? totals[i] : 1);
-  const Y = v => Tp + (1 - v) * (H - Tp - B);               // v is a 0..1 share
-  let g = [0, 0.25, 0.5, 0.75, 1].map(t => `<line x1="${L}" x2="${W - R}" y1="${round2(Y(t))}" y2="${round2(Y(t))}" stroke="${GRID}"/>` +
-    axisText(L - 6, Y(t) + 4, 'end', fmtY(t))).join('');
-  const bw = (W - L - R) / columns.length, tops = columns.map(() => []);   // segment top per column and key
-  columns.forEach((c, i) => {
-    const x = L + i * bw + bw * 0.16, w = bw * 0.68; let acc = 0;
-    keys.forEach((k, ki) => {
-      const share = (c.parts[k] || 0) / norm[i]; if (share <= 0) { tops[i][ki] = Y(acc); return; }
-      const y0 = Y(acc + share), h = Math.abs(Y(acc) - Y(acc + share)); acc += share; tops[i][ki] = y0;
-      g += `<rect x="${round2(x)}" y="${round2(y0)}" width="${round2(w)}" height="${round2(h)}" fill="${colorOf(k, ki)}">` +
-        `<title>${esc(c.label)} ${esc(k)}: ${esc(fmtY(share))}</title></rect>`;
+  const entries = legend ? keys.map((k, ki) => ({ name: k, color: colorOf(k, ki) })) : [], band = {}, W = width;
+  const body = extraTop => {
+    const lg = legendRows(entries, W, f.top + extraTop);
+    const L = 44, R = 14, Tp = 14 + f.top + extraTop + lg.height, B = 30, H = height - f.bottom;
+    if (!columns.length || !keys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
+    const totals = columns.map(c => keys.reduce((a, k) => a + (c.parts[k] || 0), 0));
+    const norm = columns.map((c, i) => totals[i] > 0 ? totals[i] : 1);
+    const Y = v => Tp + (1 - v) * (H - Tp - B);               // v is a 0..1 share
+    let g = [0, 0.25, 0.5, 0.75, 1].map(t => `<line x1="${L}" x2="${W - R}" y1="${round2(Y(t))}" y2="${round2(Y(t))}" stroke="${GRID}"/>` +
+      axisText(L - 6, Y(t) + 4, 'end', fmtY(t))).join('');
+    const bw = (W - L - R) / columns.length, tops = columns.map(() => []);   // segment top per column and key
+    columns.forEach((c, i) => {
+      const x = L + i * bw + bw * 0.16, w = bw * 0.68; let acc = 0;
+      keys.forEach((k, ki) => {
+        const share = (c.parts[k] || 0) / norm[i]; if (share <= 0) { tops[i][ki] = Y(acc); return; }
+        const y0 = Y(acc + share), h = Math.abs(Y(acc) - Y(acc + share)); acc += share; tops[i][ki] = y0;
+        g += `<rect x="${round2(x)}" y="${round2(y0)}" width="${round2(w)}" height="${round2(h)}" fill="${colorOf(k, ki)}">` +
+          `<title>${esc(c.label)} ${esc(k)}: ${esc(fmtY(share))}</title></rect>`;
+      });
+      g += axisText(x + w / 2, H - 10, 'middle', c.label);
     });
-    g += axisText(x + w / 2, H - 10, 'middle', c.label);
-  });
-  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => {
-    pick(columns, a.index, 'index'); pick(keys, a.series ?? 0, 'series');
-    return [L + a.index * bw + bw * 0.5, tops[a.index][a.series ?? 0]];
-  });
-  return svg(W, height, deco + g, lab);
+    g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B }, a => {
+      pick(columns, a.index, 'index'); pick(keys, a.series ?? 0, 'series');
+      return [L + a.index * bw + bw * 0.5, tops[a.index][a.series ?? 0]];
+    });
+    return lg.svg + g;
+  };
+  return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
 export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, niceTicks, svg, esc, fin, palette };

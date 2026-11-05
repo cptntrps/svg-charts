@@ -89,9 +89,13 @@ right edge, it goes up and to the left, right-aligned to the point. The text
 never overlaps a value label, the `target` label or, on `lineChart`, a data
 line: it moves up in 16px steps, then tries below the point, and when nothing
 inside the plot is clear it sits in the band above the plot (right-aligned on
-the title row) with a thin leader down to the point. On bar-type builders the
-leader is an elbow that runs past the bar's own value label, so it never
-crosses the number. The point is located per builder:
+the title row) with a thin leader down to the point. In the band the text never
+overprints the title: when it would, the chart adds a second 16px band row for
+it and the plot shrinks by that row. On bar-type builders the leader is an
+elbow that runs past the bar's own value label, so it never crosses the number.
+An annotation whose text equals the value label already on that point (a bar
+value, or a `valueLabels` point) keeps only the ring. The point is located per
+builder:
 
 | Builder | Annotation fields | Point |
 |---|---|---|

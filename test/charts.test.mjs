@@ -270,3 +270,40 @@ test('lineChart valueLabels: one 11px bold label per point, overlapping ones ski
   assert.ok(labels.length < 12 && labels.length >= 6, `overlapping labels are skipped, most stay (${labels.length} of 12)`);
   assert.ok(!charts.lineChart(fixtures.lineChart).includes('font-size="11"'), 'off by default');
 });
+
+// 12. Band callout clears the title; an annotation that repeats the value label keeps only the ring.
+const months6 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+const spendRevenue = {
+  title: 'Product A spend and attributed revenue by month', unit: '$k', width: 420, height: 210,
+  legend: true, valueLabels: true, labels: months6, fmtY: v => '$' + v + 'k',
+  series: [
+    { name: 'Spend', points: months6.map((m, i) => ({ x: m, y: [120, 135, 150, 160, 170, 180][i] })) },
+    { name: 'Revenue', points: months6.map((m, i) => ({ x: m, y: [150, 170, 190, 205, 225, 243][i] })) },
+    // flat filler lines leave no clear row inside the plot, so the callout must take the band
+    ...[20, 50, 80, 100, 210, 260].map(v => ({ name: 'L' + v, points: months6.map(m => ({ x: m, y: v })) })),
+  ],
+};
+
+test('band callout never overprints the title: it takes a second band row and the plot shrinks', () => {
+  const out = charts.lineChart({ ...spendRevenue, annotations: [{ index: 5, series: 1, text: '$243k revenue' }] });
+  const plain = charts.lineChart(spendRevenue);
+  const box = assertClearOfLines(out);
+  const titleLine = spendRevenue.title + ' · ' + spendRevenue.unit, titleBox = { x0: 4, x1: 4 + titleLine.length * 14 * 0.6, y0: 1, y1: 18 };
+  const overlapsTitle = box.x0 < titleBox.x1 && box.x1 > titleBox.x0 && box.y0 < titleBox.y1 && box.y1 > titleBox.y0;
+  assert.ok(!overlapsTitle, `callout at y=${box.y} overprints the title`);
+  assert.equal(box.y, 31, 'text sits on the second band row, under the title row');
+  assert.equal(topGrid(out), topGrid(plain) + 16, 'the plot shrinks by the extra band row');
+  assert.match(out, /<polyline fill="none" stroke="var\(--chart-ink[^"]*" stroke-width="1" points="/, 'thin leader kept');
+  assert.ok(out.includes('>Spend</text>') && out.includes('>Revenue</text>'), 'legend still drawn');
+});
+
+test('annotation text equal to the value label keeps the ring only', () => {
+  const ringOnly = charts.lineChart({ ...spendRevenue, annotations: [{ index: 5, series: 1, text: '$243k' }] });
+  assert.ok(/r="5" fill="none"/.test(ringOnly), 'ring drawn');
+  assert.ok(!/font-size="12" font-weight="700"/.test(ringOnly), 'no callout text');
+  assert.ok(!/stroke-width="1\.2"/.test(ringOnly) && !/stroke-width="1" points=/.test(ringOnly), 'no leader');
+  const withWords = charts.lineChart({ ...spendRevenue, annotations: [{ index: 5, series: 1, text: '$243k revenue' }] });
+  assert.ok(/font-weight="700"[^>]*>\$243k revenue</.test(withWords), 'text that adds words is drawn');
+  const bar = charts.barChart({ ...fixtures.barChart, annotations: [{ index: 0, text: '1,240' }] });
+  assert.ok(/r="5" fill="none"/.test(bar) && !/font-size="12" font-weight="700"/.test(bar), 'barChart: value repeated, ring only');
+});
