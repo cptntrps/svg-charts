@@ -46,9 +46,17 @@ into the page you generate. No DOM is required to build the SVG.
 ## Builders
 
 Every builder takes one options object and returns an SVG string. Common
-options: `label` (accessible name, required for screen readers), `width`,
-`height`, and `fmtY` / `fmtX` (value formatters; default is a thousands-grouped
-number).
+options:
+
+| Option | Meaning |
+|---|---|
+| `label` | accessible name (`aria-label`); defaults to `title` when one is given |
+| `width`, `height` | svg size in px (`dumbbell` derives its height from the row count) |
+| `fmtY`, `fmtX` | value formatters; default is a thousands-grouped number |
+| `title` | chart title, top-left, 14px bold in `--chart-ink` |
+| `unit` | unit of the values, drawn after the title as `Title · unit` in `--chart-axis-text` |
+| `source` | data source, bottom-left, 10px, drawn as `Source: ...` |
+| `annotations` | callouts: `[{ index, series?, text }]` for category charts, `[{ x, y, text }]` for `scatter` |
 
 | Builder | Shape of data | Use for |
 |---|---|---|
@@ -62,6 +70,38 @@ number).
 
 Helpers are also exported: `niceTicks(lo,hi,n)` (round axis steps), `svg(w,h,body,label)`
 (the wrapper), `esc`, `fin`, and `palette(i)`.
+
+## Title, units, source and callouts
+
+Pass `title`, `unit` and `source` to make a chart stand on its own in a slide or
+report. The title and unit share one line in a 22px band at the top; the source
+sits in a 16px band at the bottom. The plot shrinks to make room and the svg
+keeps the `height` you passed (`dumbbell` grows instead, because its height
+follows the rows). Output is unchanged when none of these options is given.
+
+`annotations` draws one callout per entry: a 5px ring on the point, a short
+leader up and to the right (it flips left near the right edge), and the text in
+12px bold ink. The point is located per builder:
+
+| Builder | Annotation fields | Point |
+|---|---|---|
+| `lineChart` | `index`, `series?` (default 0) | the series point at `labels[index]` |
+| `barChart`, `waterfall` | `index` | the top of the bar |
+| `divergingBars` | `index` | the end of the bar (top for positive, bottom for negative) |
+| `scatter` | `x`, `y` | the data coordinate |
+| `dumbbell` | `index`, `series?` (0 = `a`, 1 = `b`) | that end of the row |
+| `stackedBars` | `index`, `series?` (key position) | the top of that segment |
+
+An `index` or `series` outside the data throws a `RangeError`; a callout never
+disappears silently.
+
+```js
+barChart({
+  title: 'Cost per order', unit: '$', source: 'Finance ledger, Q2 2026',
+  data: [{ label: 'Apr', value: 58 }, { label: 'May', value: 49 }, { label: 'Jun', value: 41 }],
+  annotations: [{ index: 2, text: 'quarter low' }],
+});
+```
 
 ## Theming
 
@@ -98,6 +138,7 @@ Per-series `color` options override the palette when you pass them.
 
 ## Verify
 
-Open `demo.html` in a browser (or render it headless) to see every builder with
-sample data in both light and dark mode. That page is the reference for the
-option shapes and the theme variables.
+Run `npm test` (node:test, no dependencies). Open `demo.html` in a browser (or
+render it headless) to see every builder with sample data in both light and
+dark mode, plus one chart with title, unit, source and callouts. That page is
+the reference for the option shapes and the theme variables.

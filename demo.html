@@ -43,6 +43,7 @@ OS between light and dark to see the theme follow.</p>
 <div class="card"><h2>divergingBars</h2><div id="dv"></div></div>
 <div class="card"><h2>dumbbell</h2><div id="db"></div></div>
 <div class="card"><h2>stackedBars</h2><div id="st"></div></div>
+<div class="card"><h2>title, unit, source and a callout</h2><div id="framed"></div></div>
 
 <script type="module">
 import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars } from './charts.js';
@@ -106,6 +107,13 @@ document.getElementById('st').innerHTML = stackedBars({
   colors: ['var(--chart-1)','var(--chart-2)','var(--chart-3)'],
   columns: months.map((m,i)=>({ label:m, parts:{
     top: [0.5,0.48,0.46,0.44,0.42,0.40][i], mid: [0.3,0.31,0.33,0.34,0.35,0.36][i], low: [0.2,0.21,0.21,0.22,0.23,0.24][i] } })),
+});
+
+document.getElementById('framed').innerHTML = lineChart({
+  title: 'Cost per order', unit: '$', source: 'Finance ledger, Q2 2026',
+  labels: months, fmtY: v => '$' + v,
+  series: [{ name: 'Cost per order', points: months.map((m,i)=>({x:m,y:[58,55,61,49,44,41][i]})) }],
+  annotations: [{ index: 2, text: 'carrier switch' }, { index: 5, text: 'quarter low' }],
 });
 </script>
 </div>

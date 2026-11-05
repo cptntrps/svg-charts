@@ -16,7 +16,7 @@ so a whole report can be one self-contained file with no external chart runtime.
 ## Charts
 
 `lineChart`, `barChart`, `waterfall`, `scatter`, `divergingBars`, `dumbbell`,
-`stackedBars` — plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
+`stackedBars`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
 
 ## Use
 
@@ -34,8 +34,28 @@ el.innerHTML = lineChart({
 });
 ```
 
+Every builder also takes `title`, `unit`, `source` and `annotations` (one
+callout per entry) for presentation-ready charts:
+
+```js
+barChart({
+  title: 'Orders by channel', unit: 'orders', source: 'Order ledger, Q2 2026',
+  data: [{ label: 'Search', value: 1240 }, { label: 'Social', value: 860 }],
+  annotations: [{ index: 0, text: 'peak' }],
+});
+```
+
 Open [`demo.html`](./demo.html) for every chart with sample data in light and
 dark mode. The full option reference is in [`SKILL.md`](./SKILL.md).
+
+## Test
+
+```sh
+npm test
+```
+
+The suite (node:test, no dependencies) checks every builder against a stored
+snapshot and exercises the title, unit, source and annotation options.
 
 ## As a Claude skill
 
@@ -45,4 +65,4 @@ without a library.
 
 ## License
 
-MIT — see [`LICENSE`](./LICENSE).
+MIT. See [`LICENSE`](./LICENSE).
