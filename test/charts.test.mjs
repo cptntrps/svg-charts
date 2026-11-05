@@ -61,3 +61,44 @@ test('bands keep the svg height and move the plot', () => {
 test('annotation index out of range throws', () => {
   assert.throws(() => charts.barChart({ ...fixtures.barChart, annotations: [{ index: 9, text: 'x' }] }), RangeError);
 });
+
+// 7. The callout text clears the target label: the lead case is a point at the
+//    right edge just under the target, with a long text.
+const CHAR = 12 * 0.6;   // the width estimate charts.js uses for 12px text
+function calloutClearsTarget(out) {
+  const tl = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="end" font-size="12" fill="[^"]*" fill="var\(--chart-target[^>]*>(target [^<]*)</);
+  const ct = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(start|end)" font-size="12" font-weight="700"[^>]*>([^<]*)</);
+  assert.ok(tl && ct, 'target label and callout text found');
+  const labelX0 = +tl[1] - tl[3].length * CHAR, labelY0 = +tl[2] - 12, labelY1 = +tl[2] + 3;
+  const w = ct[4].length * CHAR, textX1 = ct[3] === 'end' ? +ct[1] : +ct[1] + w;
+  const textY0 = +ct[2] - 12, textY1 = +ct[2] + 3;
+  const yGap = Math.max(labelY0 - textY1, textY0 - labelY1);
+  assert.ok(textX1 < labelX0 || yGap >= 14, `callout [${ct[1]},${ct[2]}] "${ct[4]}" collides with target label [${tl[1]},${tl[2]}] (x1=${textX1}, labelX0=${labelX0}, yGap=${yGap})`);
+  return { ct, tl };
+}
+
+test('lineChart: callout text clears the target label at the right edge', () => {
+  const labels = ['Apr', 'May', 'Jun'];
+  const out = charts.lineChart({
+    label: 'x', labels, target: 125, fmtY: v => '$' + v,
+    series: [{ name: 'Cost', points: [{ x: 'Apr', y: 131 }, { x: 'May', y: 124 }, { x: 'Jun', y: 119 }] }],
+    annotations: [{ index: 2, text: '$119, under the $125 target' }],
+  });
+  const { ct } = calloutClearsTarget(out);
+  assert.equal(ct[3], 'end', 'text is right-aligned to a point in the right 35% of the plot');
+  assert.ok(+ct[1] <= 584, 'text does not cross the plot right edge');
+});
+
+test('barChart: callout text clears the target label on the last bar', () => {
+  const out = charts.barChart({
+    label: 'x', target: 1000, data: [{ label: 'A', value: 700 }, { label: 'B', value: 800 }, { label: 'C', value: 960 }],
+    annotations: [{ index: 2, text: 'just under target' }],
+  });
+  calloutClearsTarget(out);
+});
+
+test('callout flips left when the text would cross the right edge', () => {
+  const out = charts.barChart({ label: 'x', data: [{ label: 'A', value: 1 }, { label: 'B', value: 2 }, { label: 'C', value: 3 }],
+    annotations: [{ index: 2, text: 'a very long callout text for the last bar' }] });
+  assert.match(out, /text-anchor="end" font-size="12" font-weight="700"/);
+});

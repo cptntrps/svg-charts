@@ -80,8 +80,12 @@ keeps the `height` you passed (`dumbbell` grows instead, because its height
 follows the rows). Output is unchanged when none of these options is given.
 
 `annotations` draws one callout per entry: a 5px ring on the point, a short
-leader up and to the right (it flips left near the right edge), and the text in
-12px bold ink. The point is located per builder:
+leader, and the text in 12px bold ink. The text goes up and to the right; when
+the point is in the right 35% of the plot, or the text would cross the plot's
+right edge, it goes up and to the left, right-aligned to the point. On
+`lineChart` and `barChart` the text never overlaps the `target` label: it moves
+up in 16px steps, or below the point when the title band leaves no room above.
+The point is located per builder:
 
 | Builder | Annotation fields | Point |
 |---|---|---|

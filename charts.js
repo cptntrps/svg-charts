@@ -62,22 +62,46 @@ function frame({ title, unit, source, H }) {
   return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco };
 }
 
-// One callout: a ring on the point, a short leader up and to the right (left
-// when the text would run off the right edge), and the text.
-function callout(px, py, text, W) {
-  const d = px > W - 96 ? -1 : 1;
+// Text width estimate (a string builder has no font metrics): 0.6em per character.
+const textW = (s, fs) => String(s).length * fs * 0.6;
+// Box of a right-anchored 12px label whose baseline is at (x, y); used to keep callouts off the target label.
+const labelBox = (x, y, text) => ({ x0: x - textW(text, 12), x1: x, y0: y - 12, y1: y + 3 });
+// True when box a touches box b or comes within 14px of it vertically.
+const nearBox = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 + 14 && a.y1 > b.y0 - 14;
+
+// One callout: a ring on the point, a leader, and the text. The text sits up and
+// to the right, or up and to the left (right-aligned to the point) when the point
+// is in the right 35% of the plot or the text would cross the plot's right edge.
+// It never overlaps a box in geo.avoid (the target label): it moves up in 16px
+// steps, or goes below the point when the top band leaves no room above.
+function callout(px, py, text, geo) {
+  const { W, L, R, top = 0, bottom = Infinity, avoid = [] } = geo;
+  const tw = textW(text, 12);
+  let d = px > L + 0.65 * (W - L - R) ? -1 : 1;
+  if (d > 0 && px + 20 + tw > W - R) d = -1;
+  const x0 = d > 0 ? px + 20 : px - 20 - tw;
+  const clear = base => !avoid.some(b => nearBox({ x0, x1: x0 + tw, y0: base - 12, y1: base + 3 }, b));
+  let base = py - 13, below = false;
+  while (!clear(base) && base - 28 >= top) base -= 16;
+  if (!clear(base)) {
+    let b2 = py + 22;
+    while (!clear(b2) && b2 + 19 <= bottom) b2 += 16;
+    if (clear(b2)) { base = b2; below = true; }
+  }
+  const y1 = below ? py + 4 : py - 4, y2 = below ? base - 5 : base - 4;
   return `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` +
-    `<line x1="${round2(px + d * 4)}" y1="${round2(py - 4)}" x2="${round2(px + d * 17)}" y2="${round2(py - 17)}" stroke="${INK}" stroke-width="1.2"/>` +
-    `<text x="${round2(px + d * 20)}" y="${round2(py - 13)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
+    `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(px + d * 17)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>` +
+    `<text x="${round2(px + d * 20)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
 }
 
 // Resolve each annotation to a point through `locate(a)`, which returns [x, y]
 // or throws. A bad index is an error, not a missing callout.
-function annotate(annotations, W, locate) {
+// geo: { W, L, R, top, bottom, avoid } describes the plot for callout placement.
+function annotate(annotations, geo, locate) {
   return annotations.map((a, i) => {
     const pt = locate(a);
     if (!pt || !fin(pt[0]) || !fin(pt[1])) throw new RangeError(`annotation ${i} does not resolve to a point`);
-    return callout(pt[0], pt[1], a.text, W);
+    return callout(pt[0], pt[1], a.text, geo);
   }).join('');
 }
 
@@ -118,13 +142,19 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
       `<title>${esc(s.name)} ${esc(labels[p[0]])}: ${esc(fmtY(p[1]))}</title></circle>`).join('');
   });
+  const avoid = [];
   if (target != null && fin(target)) {
-    if (tIn) g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
-      `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` +
-      axisText(W - R, Y(target) - 5, 'end', 'target ' + fmtY(target), `fill="${TGT}"`);
-    else g += axisText(W - R, Tp + 4, 'end', 'target ' + fmtY(target) + ' is above the chart', `fill="${TGT}"`);
+    const tl = 'target ' + fmtY(target);
+    if (tIn) {
+      g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
+        `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
+      avoid.push(labelBox(W - R, Y(target) - 5, tl));
+    } else {
+      g += axisText(W - R, Tp + 4, 'end', tl + ' is above the chart', `fill="${TGT}"`);
+      avoid.push(labelBox(W - R, Tp + 4, tl + ' is above the chart'));
+    }
   }
-  g += annotate(annotations, W, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
     const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
     const p = s.points.find(p => p.x === x);
     return p && [X(a.index), Y(p.y)];
@@ -153,9 +183,14 @@ export function barChart({ data = [], label, width = 600, height = 260,
     g += axisText(x + w / 2, y - 5, 'middle', fmtY(d.value), `fill="${INK}" font-weight="600"`);
     g += axisText(x + w / 2, H - 12, 'middle', d.label);
   });
-  if (target != null && fin(target)) g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
-    `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', 'target ' + fmtY(target), `fill="${TGT}"`);
-  g += annotate(annotations, W, a => {
+  const avoid = [];
+  if (target != null && fin(target)) {
+    const tl = 'target ' + fmtY(target);
+    g += `<line x1="${L}" x2="${W - R}" y1="${round2(Y(target))}" y2="${round2(Y(target))}" ` +
+      `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
+    avoid.push(labelBox(W - R, Y(target) - 5, tl));
+  }
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value))];
   });
@@ -189,7 +224,7 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
     g += axisText(x + w / 2, H - 28, 'middle', words[0], `font-size="${fs}"`);
     if (words.length > 1) g += axisText(x + w / 2, H - 13, 'middle', words.slice(1).join(' '), `font-size="${fs}"`);
   });
-  g += annotate(annotations, W, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
     const b = pick(bars, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to))];
   });
@@ -221,7 +256,7 @@ export function scatter({ groups = [], label, width = 600, height = 330,
     g += (gr.points || []).map(p => `<circle cx="${round2(X(p.x))}" cy="${round2(Y(p.y))}" r="4.2" fill="${col}" fill-opacity=".85">` +
       `<title>${esc(p.tip || (gr.name + ': ' + fmtX(p.x) + ', ' + fmtY(p.y)))}</title></circle>`).join('');
   });
-  g += annotate(annotations, W, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
   return svg(W, height, f.deco + g, lab);
 }
 
@@ -248,7 +283,7 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
     g += axisText(x + w / 2, d.value >= 0 ? top - 5 : top + h + 13, 'middle', (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)), `fill="${INK}" font-weight="600" font-size="11"`);
     g += axisText(x + w / 2, H - 4, 'middle', d.label, `font-size="11"`);
   });
-  g += annotate(annotations, W, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(d.value)];
   });
@@ -278,7 +313,7 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
     g += `<circle cx="${round2(X(r.a))}" cy="${round2(y)}" r="5" fill="var(--chart-paper,#fff)" stroke="${col}" stroke-width="2"><title>${esc(r.label)} ${esc(aLabel)}: ${esc(fmtY(r.a))}</title></circle>`;
     g += `<circle cx="${round2(X(r.b))}" cy="${round2(y)}" r="5" fill="${col}"><title>${esc(r.label)} ${esc(bLabel)}: ${esc(fmtY(r.b))}</title></circle>`;
   });
-  g += annotate(annotations, W, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
     const r = pick(rows, a.index, 'index'), s = pick([r.a, r.b], a.series ?? 0, 'series');
     return [X(s), Tp + (a.index + 0.5) * rowH];
   });
@@ -308,7 +343,7 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
     });
     g += axisText(x + w / 2, H - 10, 'middle', c.label);
   });
-  g += annotate(annotations, W, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
     pick(columns, a.index, 'index'); pick(keys, a.series ?? 0, 'series');
     return [L + a.index * bw + bw * 0.5, tops[a.index][a.series ?? 0]];
   });
