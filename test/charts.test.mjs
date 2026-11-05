@@ -159,3 +159,57 @@ for (const name of Object.keys(fixtures)) {
     assertUniqueAttributes(charts[name]({ ...fixtures[name], ...withOptions, annotations: annotated[name] }), name + ' with options');
   });
 }
+
+// 10. lineChart callouts clear the other series' line segments.
+function calloutBox(out) {
+  const ct = out.match(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="(start|end)" font-size="12" font-weight="700"[^>]*>([^<]*)</);
+  assert.ok(ct, 'callout text found');
+  const w = ct[4].length * CHAR, x0 = ct[3] === 'end' ? +ct[1] - w : +ct[1];
+  return { x0, x1: x0 + w, y0: +ct[2] - 12, y1: +ct[2] + 3, y: +ct[2], text: ct[4] };
+}
+function seriesSegments(out) {
+  return [...out.matchAll(/<polyline fill="none" stroke="[^"]*" stroke-width="2.4"[^>]*points="([^"]*)"/g)].flatMap(m => {
+    const pts = m[1].split(' ').map(p => p.split(',').map(Number));
+    return pts.slice(1).map((p, i) => [pts[i], p]);
+  });
+}
+function assertClearOfLines(out) {
+  const box = calloutBox(out), segs = seriesSegments(out);
+  assert.ok(segs.length >= 2, 'series segments found');
+  for (const [[ax, ay], [bx, by]] of segs) {
+    const lo = Math.max(box.x0, Math.min(ax, bx)), hi = Math.min(box.x1, Math.max(ax, bx));
+    if (lo > hi) continue;
+    for (let i = 0; i < 8; i++) {
+      const x = lo + (hi - lo) * i / 7, y = ay + (by - ay) * (x - ax) / ((bx - ax) || 1);
+      assert.ok(y <= box.y0 || y >= box.y1, `callout "${box.text}" [y ${box.y0}..${box.y1}] crosses a series segment at (${x.toFixed(1)}, ${y.toFixed(1)})`);
+    }
+  }
+  return box;
+}
+const twoSeries = {
+  label: 'x', labels: ['Apr', 'May', 'Jun'], target: 125, fmtY: v => '$' + v,
+  series: [
+    { name: 'Cost', points: [{ x: 'Apr', y: 131 }, { x: 'May', y: 124 }, { x: 'Jun', y: 119 }] },
+    { name: 'Plan', points: [{ x: 'Apr', y: 150 }, { x: 'May', y: 160 }, { x: 'Jun', y: 192 }] },
+  ],
+  annotations: [{ index: 2, series: 0, text: '$119, under the $125 target' }],
+};
+
+test('lineChart: callout text clears the other series segment and the target label', () => {
+  const out = charts.lineChart(twoSeries);
+  assertClearOfLines(out);
+  calloutClearsTarget(out);
+});
+
+test('lineChart: callout goes to the top band when nothing inside the plot is clear', () => {
+  // Flat lines every 20 units from 20 to 360 in a 200px chart leave no clear row inside the plot.
+  const flat = v => ({ name: 'L' + v, points: ['Apr', 'May', 'Jun'].map(x => ({ x, y: v })) });
+  const out = charts.lineChart({
+    ...twoSeries, title: 'Cost per order', unit: '$', height: 200,
+    series: [...twoSeries.series, ...Array.from({ length: 18 }, (_, i) => flat(20 + 20 * i))],
+  });
+  const box = assertClearOfLines(out);
+  assert.equal(box.y, 15, 'text sits on the title row');
+  calloutClearsTarget(out);
+  assert.match(out, /<polyline fill="none" stroke="var\(--chart-ink[^"]*" stroke-width="1" points="/, 'thin leader to the point');
+});

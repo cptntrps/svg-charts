@@ -83,10 +83,12 @@ follows the rows). Output is unchanged when none of these options is given.
 leader, and the text in 12px bold ink. The text goes up and to the right; when
 the point is in the right 35% of the plot, or the text would cross the plot's
 right edge, it goes up and to the left, right-aligned to the point. The text
-never overlaps a value label or the `target` label: it moves up in 16px steps,
-or below the point when the title band leaves no room above. On bar-type
-builders the leader is an elbow that runs past the bar's own value label, so it
-never crosses the number. The point is located per builder:
+never overlaps a value label, the `target` label or, on `lineChart`, a data
+line: it moves up in 16px steps, then tries below the point, and when nothing
+inside the plot is clear it sits in the band above the plot (right-aligned on
+the title row) with a thin leader down to the point. On bar-type builders the
+leader is an elbow that runs past the bar's own value label, so it never
+crosses the number. The point is located per builder:
 
 | Builder | Annotation fields | Point |
 |---|---|---|

@@ -76,35 +76,57 @@ function labelBox(x, y, text, anchor = 'end', fs = 12, m = 14) {
   const w = textW(text, fs), x0 = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x;
   return { x0, x1: x0 + w, y0: y - fs, y1: y + 3, m };
 }
-// True when box a comes within b.m of box b.
-const nearBox = (a, b) => a.x0 < b.x1 + b.m && a.x1 > b.x0 - b.m && a.y0 < b.y1 + b.m && a.y1 > b.y0 - b.m;
+// A drawn line segment a callout must not cross; sampled at 8 x positions.
+const segment = (x1, y1, x2, y2, m = 2) => ({ seg: true, x1, y1, x2, y2, m });
+// True when box a comes within b.m of box or segment b.
+function nearBox(a, b) {
+  if (!b.seg) return a.x0 < b.x1 + b.m && a.x1 > b.x0 - b.m && a.y0 < b.y1 + b.m && a.y1 > b.y0 - b.m;
+  const lo = Math.max(a.x0 - b.m, Math.min(b.x1, b.x2)), hi = Math.min(a.x1 + b.m, Math.max(b.x1, b.x2));
+  if (lo > hi) return false;
+  for (let i = 0; i < 8; i++) {
+    const x = lo + (hi - lo) * i / 7, y = b.y1 + (b.y2 - b.y1) * (x - b.x1) / ((b.x2 - b.x1) || 1);
+    if (y > a.y0 - b.m && y < a.y1 + b.m) return true;
+  }
+  return false;
+}
 
 // One callout: a ring on the point, a leader, and the text. The text sits up and
 // to the right, or up and to the left (right-aligned to the point) when the point
 // is in the right 35% of the plot or the text would cross the plot's right edge.
-// It never overlaps a box in geo.avoid (target and value labels): it moves up in
-// 16px steps, or goes below the point when the top band leaves no room above.
+// It never overlaps an entry of geo.avoid (target and value labels, data lines):
+// it moves up in 16px steps, then tries below the point, and when nothing inside
+// the plot is clear it goes to the band above the plot (right-aligned, on the
+// title row) with a thin leader down to the point.
 // When the point carries its own value label (`own`), the leader is an elbow that
 // runs sideways past that label and then up, so it never crosses the number.
 function callout(px, py, text, geo, own) {
-  const { W, L, R, top = 0, bottom = Infinity, avoid = [] } = geo;
+  const { W, L, R, top = 0, plotTop = top, bottom = Infinity, avoid = [] } = geo;
   const tw = textW(text, 12);
   const reach = d => own ? (d > 0 ? Math.max(px + 17, own.x1 + 3) : Math.min(px - 17, own.x0 - 3)) : px + d * 17;
   let d = px > L + 0.65 * (W - L - R) ? -1 : 1;
   if (d > 0 && reach(1) + 3 + tw > W - R) d = -1;
-  const ex = reach(d), tx = ex + d * 3, x0 = d > 0 ? tx : tx - tw;
+  const ex = reach(d);
+  let tx = ex + d * 3, x0 = d > 0 ? tx : tx - tw;
   const clear = base => !avoid.some(b => nearBox({ x0, x1: x0 + tw, y0: base - 12, y1: base + 3 }, b));
-  let base = py - 13, below = false;
-  while (!clear(base) && base - 28 >= top) base -= 16;
+  let base = py - 13, below = false, band = false;
+  while (!clear(base) && base - 28 >= plotTop) base -= 16;
   if (!clear(base)) {
     let b2 = py + 22;
     while (!clear(b2) && b2 + 19 <= bottom) b2 += 16;
     if (clear(b2)) { base = b2; below = true; }
+    else { band = true; d = -1; base = top > 0 ? 15 : plotTop - 2; tx = W - 4; x0 = tx - tw; }
   }
   const y1 = below ? py + 4 : py - 4, y2 = below ? base - 13 : base - 4;
-  const leader = own
-    ? `<polyline fill="none" stroke="${INK}" stroke-width="1.2" points="${round2(px + d * 5)},${round2(py)} ${round2(ex)},${round2(py)} ${round2(ex)},${round2(y2)}"/>`
-    : `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(ex)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>`;
+  let leader;
+  if (band) {
+    const kx = px < x0 ? x0 - 3 : px > tx ? tx + 3 : px, ky = base + 5;
+    leader = `<polyline fill="none" stroke="${INK}" stroke-width="1" points="${round2(px)},${round2(py - 5)} ${round2(px)},${round2(ky)}` +
+      (kx !== px ? ` ${round2(kx)},${round2(ky)}` : '') + `"/>`;
+  } else if (own) {
+    leader = `<polyline fill="none" stroke="${INK}" stroke-width="1.2" points="${round2(px + d * 5)},${round2(py)} ${round2(ex)},${round2(py)} ${round2(ex)},${round2(y2)}"/>`;
+  } else {
+    leader = `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(ex)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>`;
+  }
   return `<circle cx="${round2(px)}" cy="${round2(py)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` + leader +
     `<text x="${round2(tx)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
 }
@@ -149,6 +171,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
   const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
   g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
     ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
+  const avoid = [];
   series.forEach((s, si) => {
     const col = s.color || palette(si);
     const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
@@ -156,8 +179,8 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
       `points="${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')}"/>`;
     g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
       `<title>${esc(s.name)} ${esc(labels[p[0]])}: ${esc(fmtY(p[1]))}</title></circle>`).join('');
+    for (let i = 1; i < pts.length; i++) avoid.push(segment(X(pts[i - 1][0]), Y(pts[i - 1][1]), X(pts[i][0]), Y(pts[i][1])));
   });
-  const avoid = [];
   if (target != null && fin(target)) {
     const tl = 'target ' + fmtY(target);
     if (tIn) {
@@ -169,7 +192,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
       avoid.push(labelBox(W - R, Tp + 4, tl + ' is above the chart'));
     }
   }
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
     const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
     const p = s.points.find(p => p.x === x);
     return p && [X(a.index), Y(p.y)];
@@ -205,7 +228,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
       `stroke="${TGT}" stroke-width="1.5" stroke-dasharray="5 4"/>` + axisText(W - R, Y(target) - 5, 'end', tl, `fill="${TGT}"`);
     avoid.push(labelBox(W - R, Y(target) - 5, tl));
   }
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index]];
   });
@@ -241,7 +264,7 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
     g += axisText(x + w / 2, H - 28, 'middle', words[0], `font-size="${fs}"`);
     if (words.length > 1) g += axisText(x + w / 2, H - 13, 'middle', words.slice(1).join(' '), `font-size="${fs}"`);
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
     const b = pick(bars, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(Math.max(b.from, b.to)), avoid[a.index]];
   });
@@ -273,7 +296,7 @@ export function scatter({ groups = [], label, width = 600, height = 330,
     g += (gr.points || []).map(p => `<circle cx="${round2(X(p.x))}" cy="${round2(Y(p.y))}" r="4.2" fill="${col}" fill-opacity=".85">` +
       `<title>${esc(p.tip || (gr.name + ': ' + fmtX(p.x) + ', ' + fmtY(p.y)))}</title></circle>`).join('');
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => fin(a.x) && fin(a.y) ? [X(a.x), Y(a.y)] : null);
   return svg(W, height, f.deco + g, lab);
 }
 
@@ -302,7 +325,7 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
     avoid.push(labelBox(x + w / 2, vy, val, 'middle', 11, 2));
     g += axisText(x + w / 2, H - 4, 'middle', d.label, `font-size="11"`);
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B, avoid }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B, avoid }, a => {
     const d = pick(data, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(d.value), avoid[a.index]];
   });
@@ -332,7 +355,7 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
     g += `<circle cx="${round2(X(r.a))}" cy="${round2(y)}" r="5" fill="var(--chart-paper,#fff)" stroke="${col}" stroke-width="2"><title>${esc(r.label)} ${esc(aLabel)}: ${esc(fmtY(r.a))}</title></circle>`;
     g += `<circle cx="${round2(X(r.b))}" cy="${round2(y)}" r="5" fill="${col}"><title>${esc(r.label)} ${esc(bLabel)}: ${esc(fmtY(r.b))}</title></circle>`;
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => {
     const r = pick(rows, a.index, 'index'), s = pick([r.a, r.b], a.series ?? 0, 'series');
     return [X(s), Tp + (a.index + 0.5) * rowH];
   });
@@ -362,7 +385,7 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
     });
     g += axisText(x + w / 2, H - 10, 'middle', c.label);
   });
-  g += annotate(annotations, { W, L, R, top: f.top, bottom: H - B }, a => {
+  g += annotate(annotations, { W, L, R, top: f.top, plotTop: Tp, bottom: H - B }, a => {
     pick(columns, a.index, 'index'); pick(keys, a.series ?? 0, 'series');
     return [L + a.index * bw + bw * 0.5, tops[a.index][a.series ?? 0]];
   });
