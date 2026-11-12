@@ -15,8 +15,8 @@ so a whole report can be one self-contained file with no external chart runtime.
 
 ## Charts
 
-`lineChart`, `barChart`, `waterfall`, `scatter`, `divergingBars`, `dumbbell`,
-`stackedBars`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
+`lineChart` (with `area`), `barChart`, `hbarChart`, `waterfall`, `scatter`, `divergingBars`, `dumbbell`,
+`stackedBars`, `donut`, `heatmap`, `sparkline`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
 
 ## Use
 

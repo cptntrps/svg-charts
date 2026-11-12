@@ -1,6 +1,6 @@
 ---
 name: svg-charts
-description: Use when a page, report, or dashboard needs charts (line, bar, waterfall, scatter, diverging, dumbbell, stacked) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
+description: Use when a page, report, or dashboard needs charts (line, area, bar, horizontal bar, waterfall, scatter, diverging, dumbbell, stacked, donut, heatmap, sparkline) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
 ---
 
 # svg-charts
@@ -70,6 +70,17 @@ options:
 | `divergingBars` | `data:[{label,value,color?}]` | change that can be positive or negative |
 | `dumbbell` | `rows:[{label,a,b,color?}]`, `aLabel`, `bLabel` | two states per row (before vs after) |
 | `stackedBars` | `columns:[{label,parts:{key:value}}]`, `keys:[...]`, `colors:[...]` | shares that sum within each column |
+| `hbarChart` | `data:[{label,value,color?,series?}]`, `highlight?:[index]`, `rowHeight?` | ranked categories, long labels, narrow pages; height follows the rows; values of zero or more |
+| `donut` | `slices:[{label,value,color?}]`, `centerValue?`, `centerLabel?` | shares of one total, six slices at most; the list gives value and share |
+| `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
+| `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
+
+`lineChart` takes `area: true` to fill under each series (volume over time). `waterfall` takes `zoom: true` to start the axis
+below the lowest level instead of at zero, so small steps between large totals stay visible. `hbarChart`, `donut`, `heatmap`
+and `sparkline` take `title`, `unit` and `source` (not `sparkline`) but no `annotations`. A value outside a
+builder's domain (a negative bar in `hbarChart`, a zero slice in `donut`, an unknown heatmap row) throws a
+`RangeError`. Extra theme hooks: `--chart-muted` (muted bars and late slices) and `--chart-paper` (text on a
+dark heatmap cell).
 
 Helpers are also exported: `niceTicks(lo,hi,n)` (round axis steps), `svg(w,h,body,label)`
 (the wrapper), `esc`, `fin`, and `palette(i)`.

@@ -307,3 +307,53 @@ test('annotation text equal to the value label keeps the ring only', () => {
   const bar = charts.barChart({ ...fixtures.barChart, annotations: [{ index: 0, text: '1,240' }] });
   assert.ok(/r="5" fill="none"/.test(bar) && !/font-size="12" font-weight="700"/.test(bar), 'barChart: value repeated, ring only');
 });
+
+// Builders added in 0.3.0: hbarChart, donut, heatmap, sparkline, and lineChart's area option.
+test('lineChart: area fills under each series and is off by default', () => {
+  assert.ok(!charts.lineChart(fixtures.lineChart).includes('<polygon'));
+  const out = charts.lineChart({ ...fixtures.lineChart, area: true });
+  assert.equal((out.match(/<polygon /g) || []).length, fixtures.lineChart.series.length);
+});
+
+test('hbarChart: height follows the rows, a long label is cut, a negative value throws', () => {
+  const out = charts.hbarChart({ ...fixtures.hbarChart, width: 360 });
+  assert.ok(out.includes('viewBox="0 0 360 152"'), out.slice(0, 80));
+  assert.ok(out.includes('…'), 'long label is shortened');
+  assert.ok(out.includes('<title>Warehouse club with a long name: ' + fixtures.hbarChart.fmtY(4210) + '</title>'), 'the full label stays in the tooltip');
+  assert.throws(() => charts.hbarChart({ data: [{ label: 'a', value: -1 }] }), RangeError);
+});
+
+test('hbarChart: highlight mutes the other bars and rejects a bad index', () => {
+  const out = charts.hbarChart({ ...fixtures.hbarChart, highlight: [0] });
+  assert.equal((out.match(/fill="var\(--chart-muted/g) || []).length, fixtures.hbarChart.data.length - 1);
+  assert.throws(() => charts.hbarChart({ ...fixtures.hbarChart, highlight: [9] }), RangeError);
+});
+
+test('donut: one arc per slice, shares sum to the total, a zero slice throws', () => {
+  const out = charts.donut(fixtures.donut);
+  assert.equal((out.match(/<circle /g) || []).length, fixtures.donut.slices.length);
+  assert.ok(out.includes('>' + fixtures.donut.fmtY(2495) + '<'), 'centre shows the total');
+  assert.ok(out.includes(fixtures.donut.fmtY(820) + ' · 33%'), 'list shows value and share');
+  assert.throws(() => charts.donut({ slices: [{ label: 'a', value: 0 }] }), RangeError);
+});
+
+test('heatmap: a missing cell is drawn empty, an unknown row throws', () => {
+  const out = charts.heatmap(fixtures.heatmap);
+  assert.equal((out.match(/: no data<\/title>/g) || []).length, 1);
+  assert.throws(() => charts.heatmap({ rows: ['a'], cols: ['x'], cells: [{ row: 'b', col: 'x', value: 1 }] }), RangeError);
+});
+
+test('sparkline: one line and one end dot; fewer than two values gives an empty svg', () => {
+  const out = charts.sparkline(fixtures.sparkline);
+  assert.ok(out.includes('<polyline') && (out.match(/<circle /g) || []).length === 1);
+  assert.ok(!charts.sparkline({ values: [1] }).includes('<polyline'));
+});
+
+test('waterfall: zoom starts the axis above zero and keeps the default output unchanged', () => {
+  const items = [{ label: 'Start', value: 8762, total: true }, { label: 'Up', value: 410 }, { label: 'Down', value: -140 }, { label: 'End', value: 9032, total: true }];
+  const plain = charts.waterfall({ items }), zoomed = charts.waterfall({ items, zoom: true });
+  assert.ok(plain.includes('>0<'), 'default axis starts at zero');
+  assert.ok(!zoomed.includes('>0<'), 'zoomed axis does not start at zero');
+  const stepHeight = s => +s.match(/height="([\d.]+)" rx="3" fill="[^"]*"><title>Up:/)[1];
+  assert.ok(stepHeight(zoomed) > stepHeight(plain) * 3, 'the step is at least three times taller');
+});

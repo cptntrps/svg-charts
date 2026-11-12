@@ -58,4 +58,25 @@ export const fixtures = {
       },
     })),
   },
+  hbarChart: {
+    label: 'Spend by store', fmtY: usd,
+    data: [
+      { label: 'Warehouse club with a long name', value: 4210 }, { label: 'Corner market', value: 2380 },
+      { label: 'Online', value: 1675 }, { label: 'Bakery', value: 310 }, { label: 'Other', value: 0 },
+    ],
+  },
+  donut: {
+    label: 'Spend share by category', fmtY: usd, centerLabel: 'total',
+    slices: [
+      { label: 'Produce', value: 820 }, { label: 'Meat and fish', value: 640 }, { label: 'Dairy', value: 410 },
+      { label: 'Pantry', value: 380 }, { label: 'Drinks', value: 150 }, { label: 'Other', value: 95 },
+    ],
+  },
+  heatmap: {
+    label: 'Orders by weekday and month',
+    rows: ['Mon', 'Wed', 'Sat'], cols: months,
+    cells: ['Mon', 'Wed', 'Sat'].flatMap((r, i) => months.map((c, j) => ({ row: r, col: c, value: (i + 1) * (j + 2) })))
+      .filter(c => !(c.row === 'Wed' && c.col === months[2])),
+  },
+  sparkline: { label: 'Weekly spend', values: [12, 14, 13, 17, 16, 21, 19] },
 };

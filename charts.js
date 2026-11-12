@@ -204,7 +204,7 @@ function gridY(ticks, L, R, W, Y, fmt) {
 // ---------- line chart (multi-series) ----------
 // series: [{ name, color?, dash?, points:[{x,y}] }]; labels: the ordered x categories.
 export function lineChart({ series = [], labels = [], label, width = 600, height = 280,
-  target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false } = {}) {
+  target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false, area = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'line chart';
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], band = {}, W = width;
@@ -227,6 +227,8 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     series.forEach((s, si) => {
       const col = colorOf(s, si);
       const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
+      if (area && pts.length > 1) g += `<polygon fill="${col}" fill-opacity=".14" points="${round2(X(pts[0][0]))},${round2(Y(0))} ` +
+        `${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')} ${round2(X(pts[pts.length - 1][0]))},${round2(Y(0))}"/>`;
       g += `<polyline fill="none" stroke="${col}" stroke-width="2.4" stroke-dasharray="${s.dash || ''}" ` +
         `points="${pts.map(p => round2(X(p[0])) + ',' + round2(Y(p[1]))).join(' ')}"/>`;
       g += pts.map(p => `<circle cx="${round2(X(p[0]))}" cy="${round2(Y(p[1]))}" r="3" fill="${col}">` +
@@ -306,8 +308,10 @@ export function barChart({ data = [], label, width = 600, height = 260,
 
 // ---------- waterfall / bridge ----------
 // items: [{ label, value, total? }]  total bars are drawn from zero; others step the running sum.
+// `zoom: true` starts the axis below the lowest level instead of at zero, so that small steps between
+// large totals stay visible; the total bars then rise from that axis start, which the lowest tick names.
 export function waterfall({ items = [], label, width = 600, height = 290, fmtY = num,
-  title, unit, source, annotations = [], legend = false, colors } = {}) {
+  title, unit, source, annotations = [], legend = false, colors, zoom = false } = {}) {
   const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'waterfall';
   const groups = seriesLegend(items, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
@@ -319,9 +323,13 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
       else { bars.push({ name: it.label, from: run, to: run + it.value, kind: it.value < 0 ? 'down' : 'up', delta: it.value, it }); run += it.value; }
     }
     if (!bars.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
-    let ymax = Math.max(...bars.map(b => Math.max(b.from, b.to))) * 1.12;
-    const ticks = niceTicks(0, ymax); ymax = ticks[ticks.length - 1] || 1;
-    const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - v / ymax) * (H - Tp - B), avoid = [], valText = [];
+    const hiLevel = Math.max(...bars.map(b => Math.max(b.from, b.to)));
+    const loLevel = Math.min(...bars.map(b => b.kind === 'total' ? b.to : Math.min(b.from, b.to)));
+    let ymax = hiLevel * 1.12, ymin = 0;
+    if (zoom && loLevel > 0 && hiLevel > loLevel) { ymin = Math.max(0, loLevel - (hiLevel - loLevel) * 0.6); ymax = hiLevel + (hiLevel - loLevel) * 0.25; }
+    const ticks = niceTicks(ymin, ymax); ymax = ticks[ticks.length - 1] || 1; ymin = zoom ? ticks[0] : 0;
+    const bw = (W - L - R) / bars.length, Y = v => Tp + (1 - (v - ymin) / (ymax - ymin)) * (H - Tp - B), avoid = [], valText = [];
+    bars.forEach(b => { if (b.kind === 'total') b.from = ymin; });
     let g = gridY(ticks, L, R, W, Y, fmtY);
     bars.forEach((b, i) => {
       const x = L + i * bw + bw * 0.16, w = bw * 0.68, top = Y(Math.max(b.from, b.to)), h = Math.max(1, Math.abs(Y(b.from) - Y(b.to)));
@@ -494,4 +502,134 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
   return svg(W, height, f.deco + twoPass(body, band), lab);
 }
 
-export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, niceTicks, svg, esc, fin, palette };
+const MUTED = 'var(--chart-muted,#b8c0c4)';
+const PAPER = 'var(--chart-paper,#fff)';
+// Shorten a label to the width it has (0.6em per character), with an ellipsis.
+const fit = (s, px, fs = 12) => {
+  const t = String(s), n = Math.max(1, Math.floor(px / (fs * 0.6)));
+  return t.length > n ? t.slice(0, Math.max(1, n - 1)) + '…' : t;
+};
+
+// ---------- horizontal bar chart (ranked categories, long labels, narrow pages) ----------
+// data: [{ label, value, color?, series? }]; values must be zero or more (use divergingBars for signed change).
+// Height follows the row count. All bars share one colour unless items name a `series` or a `color`;
+// `highlight: [index, ...]` keeps those bars in colour and mutes the others.
+export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY = num,
+  title, unit, source, legend = false, colors, highlight = null } = {}) {
+  const lab = label ?? title ?? 'bar chart', W = width;
+  const groups = seriesLegend(data, colors), entries = legend ? groups : [];
+  const bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lg = legendRows(entries, W, bandTop);
+  const Tp = bandTop + lg.height + 6, plotH = Math.max(1, data.length) * rowHeight;
+  const height = Tp + plotH + 6 + (source != null ? BOTTOM_BAND : 0);
+  const f = frame({ title, unit, source, H: height });
+  const vals = data.map(d => d.value);
+  if (!vals.length) return svg(W, height + 24, f.deco + lg.svg + axisText(W / 2, Tp + 18, 'middle', 'no data'), lab);
+  vals.forEach((v, i) => { if (!fin(v) || v < 0) throw new RangeError(`hbarChart value ${i} must be a number of zero or more`); });
+  if (highlight) highlight.forEach(i => pick(data, i, 'highlight'));
+  const L = Math.min(Math.ceil(Math.max(...data.map(d => textW(d.label, 12)))) + 12, Math.round(W * 0.42));
+  const valW = Math.max(...data.map(d => textW(fmtY(d.value), 12))) + 10;
+  const hi = Math.max(...vals) || 1, X = v => L + v / hi * (W - L - valW);
+  let g = '';
+  data.forEach((d, i) => {
+    const bh = Math.min(18, rowHeight - 8), by = Tp + i * rowHeight + (rowHeight - bh) / 2;
+    const base = d.series != null ? groups.find(e => e.name === d.series).color : palette(0);
+    const col = highlight && !highlight.includes(i) ? MUTED : pickColor(d.color, colors, [d.label, d.series], base);
+    const w = Math.max(1, X(d.value) - L);
+    g += axisText(L - 8, by + bh / 2 + 4, 'end', fit(d.label, L - 12), `fill="${INK}"`);
+    g += `<rect x="${L}" y="${round2(by)}" width="${round2(w)}" height="${bh}" rx="3" fill="${col}">` +
+      `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
+    g += axisText(L + w + 6, by + bh / 2 + 4, 'start', fmtY(d.value), `fill="${INK}" font-weight="600"`);
+  });
+  return svg(W, height, f.deco + lg.svg + g, lab);
+}
+
+// ---------- donut (shares of one total, few slices) ----------
+// slices: [{ label, value, color? }]; values must be more than zero. The centre shows
+// `centerValue` (default: the formatted total) over `centerLabel`. The list on the right
+// gives each slice its value and its share. Slices after the fifth take the muted colour.
+export function donut({ slices = [], label, width = 600, height = 220, fmtY = num,
+  title, unit, source, colors, centerValue, centerLabel } = {}) {
+  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'donut', W = width, H = height - f.bottom;
+  if (!slices.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
+  slices.forEach((s, i) => { if (!fin(s.value) || s.value <= 0) throw new RangeError(`donut slice ${i} must be a number above zero`); });
+  const total = slices.reduce((a, s) => a + s.value, 0);
+  const top = f.top + 8, avail = H - top - 8;
+  const r = Math.min(avail / 2, W * 0.2), cx = r + 6, cy = top + avail / 2, sw = r * 0.36, rm = r - sw / 2, C = 2 * Math.PI * rm;
+  let acc = 0, g = '';
+  const colorOf = (s, i) => pickColor(s.color, colors, [s.label], i < 5 ? palette(i) : MUTED);
+  slices.forEach((s, i) => {
+    const frac = s.value / total, gap = slices.length > 1 ? 1.5 : 0;
+    g += `<circle cx="${round2(cx)}" cy="${round2(cy)}" r="${round2(rm)}" fill="none" stroke="${colorOf(s, i)}" stroke-width="${round2(sw)}" ` +
+      `stroke-dasharray="${round2(Math.max(0.5, frac * C - gap))} ${round2(C)}" stroke-dashoffset="${round2(-acc * C)}" ` +
+      `transform="rotate(-90 ${round2(cx)} ${round2(cy)})"><title>${esc(s.label)}: ${esc(fmtY(s.value))} (${Math.round(frac * 100)}%)</title></circle>`;
+    acc += frac;
+  });
+  const cv = centerValue ?? fmtY(total), inner = 2 * (r - sw) - 6;
+  g += axisText(cx, cy + (centerLabel != null ? 2 : 6), 'middle', cv, `fill="${INK}" font-weight="700" font-size="${textW(cv, 17) > inner ? 12 : 17}"`);
+  if (centerLabel != null) g += axisText(cx, cy + 16, 'middle', fit(centerLabel, inner, 10), `font-size="10"`);
+  const x0 = cx + r + 18, rowH = Math.min(24, avail / slices.length), y0 = cy - rowH * slices.length / 2;
+  slices.forEach((s, i) => {
+    const y = y0 + i * rowH + rowH / 2, right = fmtY(s.value) + ' · ' + Math.round(s.value / total * 100) + '%';
+    g += `<rect x="${round2(x0)}" y="${round2(y - 5)}" width="10" height="10" rx="2" fill="${colorOf(s, i)}"/>`;
+    g += axisText(x0 + 16, y + 4, 'start', fit(s.label, W - 4 - textW(right, 12) - (x0 + 16) - 8), `fill="${INK}"`);
+    g += axisText(W - 4, y + 4, 'end', right, `font-weight="600" fill="${INK}"`);
+  });
+  return svg(W, height, f.deco + g, lab);
+}
+
+// ---------- heatmap (a value per row and column: weekday by week, category by month) ----------
+// rows: [name, ...]; cols: [name, ...]; cells: [{ row, col, value }]. A missing cell is drawn empty.
+// One hue; the opacity follows the value from the lowest (or zero) to the highest. Height follows the rows.
+export function heatmap({ rows = [], cols = [], cells = [], label, width = 600, cellHeight, fmtY = num,
+  title, unit, source, color, cellLabels = true } = {}) {
+  const lab = label ?? title ?? 'heatmap', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const L = rows.length ? Math.min(Math.ceil(Math.max(...rows.map(r => textW(r, 11)))) + 10, Math.round(W * 0.3)) : 10;
+  const cw = (W - L - 4) / Math.max(1, cols.length), ch = cellHeight ?? Math.max(18, Math.min(34, cw));
+  const Tp = bandTop + 20, plotH = Math.max(1, rows.length) * ch, scaleY = Tp + plotH + 8;
+  const height = scaleY + 14 + (source != null ? BOTTOM_BAND : 0);
+  const f = frame({ title, unit, source, H: height }), col = color || palette(0);
+  const at = new Map();
+  cells.forEach((c, i) => {
+    if (!rows.includes(c.row) || !cols.includes(c.col)) throw new RangeError(`heatmap cell ${i} names an unknown row or column`);
+    if (c.value != null && !fin(c.value)) throw new RangeError(`heatmap cell ${i} value is not a number`);
+    if (c.value != null) at.set(c.row + '\u0000' + c.col, c.value);
+  });
+  const vals = [...at.values()];
+  if (!vals.length) return svg(W, height, f.deco + axisText(W / 2, Tp + plotH / 2, 'middle', 'no data'), lab);
+  const lo = Math.min(0, ...vals), hi = Math.max(...vals), op = v => hi === lo ? 1 : 0.1 + 0.9 * (v - lo) / (hi - lo);
+  const every = Math.max(1, Math.ceil((Math.max(...cols.map(c => textW(c, 11))) + 6) / cw));
+  let g = cols.map((c, j) => j % every === 0 ? axisText(L + (j + 0.5) * cw, Tp - 6, 'middle', c, `font-size="11"`) : '').join('');
+  const showVal = cellLabels && cw >= Math.max(...vals.map(v => textW(fmtY(v), 10))) + 4;
+  rows.forEach((r, i) => {
+    g += axisText(L - 6, Tp + (i + 0.5) * ch + 4, 'end', fit(r, L - 8, 11), `font-size="11"`);
+    cols.forEach((c, j) => {
+      const v = at.get(r + '\u0000' + c), x = L + j * cw + 1, y = Tp + i * ch + 1;
+      const box = `x="${round2(x)}" y="${round2(y)}" width="${round2(cw - 2)}" height="${round2(ch - 2)}" rx="3"`;
+      if (v == null) { g += `<rect ${box} fill="${GRID}" fill-opacity=".5"><title>${esc(r)} ${esc(c)}: no data</title></rect>`; return; }
+      g += `<rect ${box} fill="${col}" fill-opacity="${round2(op(v))}"><title>${esc(r)} ${esc(c)}: ${esc(fmtY(v))}</title></rect>`;
+      if (showVal) g += axisText(x + cw / 2 - 1, y + ch / 2 + 2.5, 'middle', fmtY(v), `font-size="10" font-weight="600" fill="${op(v) > 0.55 ? PAPER : INK}"`);
+    });
+  });
+  const loW = textW(fmtY(lo), 10), sx = L + loW + 6;
+  g += axisText(L, scaleY + 10, 'start', fmtY(lo), `font-size="10"`);
+  for (let k = 0; k < 5; k++) g += `<rect x="${round2(sx + k * 16)}" y="${scaleY}" width="14" height="12" rx="2" fill="${col}" fill-opacity="${round2(0.1 + 0.9 * k / 4)}"/>`;
+  g += axisText(sx + 5 * 16 + 4, scaleY + 10, 'start', fmtY(hi), `font-size="10"`);
+  return svg(W, height, f.deco + g, lab);
+}
+
+// ---------- sparkline (the shape of a short series, no axes) ----------
+// values: [number, ...]. A dot marks the last value.
+export function sparkline({ values = [], width = 120, height = 32, color, label } = {}) {
+  const v = values.filter(fin), col = color || palette(0);
+  if (v.length < 2) return svg(width, height, '', label ?? 'sparkline');
+  const lo = Math.min(...v), hi = Math.max(...v), pad = 4;
+  const X = i => pad + i * (width - 2 * pad) / (v.length - 1);
+  const Y = y => hi === lo ? height / 2 : pad + (1 - (y - lo) / (hi - lo)) * (height - 2 * pad);
+  return svg(width, height,
+    `<polyline fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${v.map((y, i) => round2(X(i)) + ',' + round2(Y(y))).join(' ')}"/>` +
+    `<circle cx="${round2(X(v.length - 1))}" cy="${round2(Y(v[v.length - 1]))}" r="2.8" fill="${col}"/>`, label ?? 'sparkline');
+}
+
+
+export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, hbarChart, donut, heatmap, sparkline, niceTicks, svg, esc, fin, palette };

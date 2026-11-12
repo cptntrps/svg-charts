@@ -1,6 +1,6 @@
 {
   "name": "svg-charts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Dependency-free charts as plain inline-SVG strings.",
   "type": "module",
   "main": "charts.js",
