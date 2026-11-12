@@ -357,3 +357,13 @@ test('waterfall: zoom starts the axis above zero and keeps the default output un
   const stepHeight = s => +s.match(/height="([\d.]+)" rx="3" fill="[^"]*"><title>Up:/)[1];
   assert.ok(stepHeight(zoomed) > stepHeight(plain) * 3, 'the step is at least three times taller');
 });
+
+test('hbarChart: diverging draws signed bars on both sides of a zero line', () => {
+  const data = [{ label: 'Groceries', value: 495 }, { label: 'Shopping', value: -1114 }, { label: 'Flat', value: 0 }];
+  const out = charts.hbarChart({ data, diverging: true, width: 360 });
+  assert.ok(out.includes('>+495<') && out.includes('>−1,114<'), 'signed value labels');
+  const zero = +out.match(/<line x1="([\d.]+)"/)[1];
+  const x = name => +out.match(new RegExp('<rect x="([\\d.]+)"[^>]*><title>' + name))[1];
+  assert.ok(x('Shopping') < zero && Math.abs(x('Groceries') - zero) < 0.01, 'negative bar left of zero, positive from zero');
+  assert.throws(() => charts.hbarChart({ data }), /diverging: true/);
+});

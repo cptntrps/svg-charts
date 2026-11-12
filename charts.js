@@ -511,11 +511,12 @@ const fit = (s, px, fs = 12) => {
 };
 
 // ---------- horizontal bar chart (ranked categories, long labels, narrow pages) ----------
-// data: [{ label, value, color?, series? }]; values must be zero or more (use divergingBars for signed change).
-// Height follows the row count. All bars share one colour unless items name a `series` or a `color`;
-// `highlight: [index, ...]` keeps those bars in colour and mutes the others.
+// data: [{ label, value, color?, series? }]. Height follows the row count. All bars share one colour unless
+// items name a `series` or a `color`; `highlight: [index, ...]` keeps those bars in colour and mutes the others.
+// Values must be zero or more, unless `diverging: true`: then bars grow left and right from a zero line
+// (signed change per category), coloured by sign (--chart-up, --chart-down) with signed value labels.
 export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY = num,
-  title, unit, source, legend = false, colors, highlight = null } = {}) {
+  title, unit, source, legend = false, colors, highlight = null, diverging = false } = {}) {
   const lab = label ?? title ?? 'bar chart', W = width;
   const groups = seriesLegend(data, colors), entries = legend ? groups : [];
   const bandTop = title != null || unit != null ? TOP_BAND : 0;
@@ -525,21 +526,28 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   const f = frame({ title, unit, source, H: height });
   const vals = data.map(d => d.value);
   if (!vals.length) return svg(W, height + 24, f.deco + lg.svg + axisText(W / 2, Tp + 18, 'middle', 'no data'), lab);
-  vals.forEach((v, i) => { if (!fin(v) || v < 0) throw new RangeError(`hbarChart value ${i} must be a number of zero or more`); });
+  vals.forEach((v, i) => {
+    if (!fin(v) || (!diverging && v < 0)) throw new RangeError(`hbarChart value ${i} must be a number${diverging ? '' : ' of zero or more (pass diverging: true for signed values)'}`);
+  });
   if (highlight) highlight.forEach(i => pick(data, i, 'highlight'));
   const L = Math.min(Math.ceil(Math.max(...data.map(d => textW(d.label, 12)))) + 12, Math.round(W * 0.42));
-  const valW = Math.max(...data.map(d => textW(fmtY(d.value), 12))) + 10;
-  const hi = Math.max(...vals) || 1, X = v => L + v / hi * (W - L - valW);
-  let g = '';
+  const text = d => diverging ? (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)) : fmtY(d.value);
+  const side = keep => Math.max(0, ...data.filter(keep).map(d => textW(text(d), 12))) + 10;
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = (hi - lo) || 1;
+  const x0 = L + (lo < 0 ? side(d => d.value < 0) : 0), x1 = W - side(d => d.value >= 0);
+  const X = v => x0 + (v - lo) / span * (x1 - x0), zero = X(0);
+  let g = diverging ? `<line x1="${round2(zero)}" x2="${round2(zero)}" y1="${Tp}" y2="${Tp + plotH}" stroke="${INK}" stroke-width="1.2"/>` : '';
   data.forEach((d, i) => {
     const bh = Math.min(18, rowHeight - 8), by = Tp + i * rowHeight + (rowHeight - bh) / 2;
-    const base = d.series != null ? groups.find(e => e.name === d.series).color : palette(0);
+    const base = d.series != null ? groups.find(e => e.name === d.series).color
+      : diverging ? (d.value < 0 ? 'var(--chart-down,#0ca37a)' : 'var(--chart-up,#2a78d6)') : palette(0);
     const col = highlight && !highlight.includes(i) ? MUTED : pickColor(d.color, colors, [d.label, d.series], base);
-    const w = Math.max(1, X(d.value) - L);
+    const w = Math.max(1, Math.abs(X(d.value) - zero)), bx = d.value < 0 ? zero - w : zero;
     g += axisText(L - 8, by + bh / 2 + 4, 'end', fit(d.label, L - 12), `fill="${INK}"`);
-    g += `<rect x="${L}" y="${round2(by)}" width="${round2(w)}" height="${bh}" rx="3" fill="${col}">` +
-      `<title>${esc(d.label)}: ${esc(fmtY(d.value))}</title></rect>`;
-    g += axisText(L + w + 6, by + bh / 2 + 4, 'start', fmtY(d.value), `fill="${INK}" font-weight="600"`);
+    g += `<rect x="${round2(bx)}" y="${round2(by)}" width="${round2(w)}" height="${bh}" rx="3" fill="${col}">` +
+      `<title>${esc(d.label)}: ${esc(text(d))}</title></rect>`;
+    g += d.value < 0 ? axisText(bx - 6, by + bh / 2 + 4, 'end', text(d), `fill="${INK}" font-weight="600"`)
+      : axisText(bx + w + 6, by + bh / 2 + 4, 'start', text(d), `fill="${INK}" font-weight="600"`);
   });
   return svg(W, height, f.deco + lg.svg + g, lab);
 }

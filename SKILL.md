@@ -70,7 +70,7 @@ options:
 | `divergingBars` | `data:[{label,value,color?}]` | change that can be positive or negative |
 | `dumbbell` | `rows:[{label,a,b,color?}]`, `aLabel`, `bLabel` | two states per row (before vs after) |
 | `stackedBars` | `columns:[{label,parts:{key:value}}]`, `keys:[...]`, `colors:[...]` | shares that sum within each column |
-| `hbarChart` | `data:[{label,value,color?,series?}]`, `highlight?:[index]`, `rowHeight?` | ranked categories, long labels, narrow pages; height follows the rows; values of zero or more |
+| `hbarChart` | `data:[{label,value,color?,series?}]`, `highlight?:[index]`, `rowHeight?`, `diverging?` | ranked categories, long labels, narrow pages; height follows the rows; values of zero or more, or signed change per category with `diverging: true` (bars left and right of a zero line) |
 | `donut` | `slices:[{label,value,color?}]`, `centerValue?`, `centerLabel?` | shares of one total, six slices at most; the list gives value and share |
 | `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
 | `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
