@@ -406,3 +406,19 @@ test('0.4.0 builders: each draws its marks and refuses values outside its domain
   const pa = charts.pareto({ ...F.pareto, data: [...F.pareto.data].reverse() });
   assert.ok(pa.indexOf('Coffee:') < pa.indexOf('Milk:') && pa.includes('running share 100%'), 'sorted from the largest, ends at 100%');
 });
+
+test('wordCloud: no word overlaps another, the largest is the biggest, a word with no room is counted', () => {
+  const out = charts.wordCloud({ ...fixtures.wordCloud, width: 358, height: 240 });
+  const words = [...out.matchAll(/<text x="([\d.]+)" y="([\d.]+)" text-anchor="middle" font-size="(\d+)"[^>]*>([^<]+)<title>/g)]
+    .map(m => { const fs = +m[3], w = m[4].length * fs * 0.58 + 6, h = fs * 1.12; return { t: m[4], fs, x: +m[1] - w / 2, y: +m[2] - h * 0.78, w, h }; });
+  assert.equal(words.length + +out.match(/data-omitted="(\d+)"/)[1], fixtures.wordCloud.words.length);
+  assert.ok(words.length >= 14, 'most words find a place: ' + words.length);
+  for (let i = 0; i < words.length; i++) for (let j = i + 1; j < words.length; j++) {
+    const a = words[i], b = words[j];
+    assert.ok(!(a.x < b.x + b.w - 0.01 && a.x + a.w > b.x + 0.01 && a.y < b.y + b.h - 0.01 && a.y + a.h > b.y + 0.01), `${a.t} overlaps ${b.t}`);
+  }
+  assert.equal(words[0].t, 'churrasco'); assert.equal(words[0].fs, 40);
+  const crowded = charts.wordCloud({ words: Array.from({ length: 80 }, (_, i) => ({ text: 'palavra' + i, value: 80 - i })), width: 200, height: 120 });
+  assert.ok(+crowded.match(/data-omitted="(\d+)"/)[1] > 0);
+  assert.throws(() => charts.wordCloud({ words: [{ text: '', value: 1 }] }), RangeError);
+});

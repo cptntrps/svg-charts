@@ -126,4 +126,10 @@ export const fixtures = {
     label: 'Spend by item', fmtY: usd,
     data: [{ label: 'Coffee', value: 200 }, { label: 'Milk', value: 177 }, { label: 'Beef', value: 130 }, { label: 'Protein', value: 125 }, { label: 'Soda', value: 94 }, { label: 'Fish', value: 81 }, { label: 'Rest', value: 60 }],
   },
+  wordCloud: {
+    label: 'Words in the group chat',
+    words: [['churrasco', 48], ['sábado', 41], ['trabalho', 33], ['futebol', 30], ['viagem', 24], ['aniversário', 22], ['cerveja', 21], ['reunião', 18],
+      ['praia', 16], ['presente', 14], ['carro', 13], ['médico', 12], ['feriado', 11], ['pizza', 10], ['filme', 9], ['escola', 8], ['chuva', 7], ['academia', 6]]
+      .map(([text, value]) => ({ text, value })),
+  },
 };

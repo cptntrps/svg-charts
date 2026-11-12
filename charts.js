@@ -971,6 +971,37 @@ export function pareto({ data = [], label, width = 600, height = 270, fmtY = num
   return svg(W, height, f.deco + g, lab);
 }
 
+// ---------- word cloud (which words or names carry a body of text) ----------
+// words: [{ text, value, color? }], value above zero. The largest word sits in the middle; the others are placed
+// along a spiral, largest first, where their box touches no placed word. A word that finds no free place is left
+// out and counted in the svg's data-omitted attribute, never drawn over another. Horizontal text only: it reads.
+export function wordCloud({ words = [], label, width = 600, height = 300, minSize = 12, maxSize = 40, fmtY = num,
+  title, unit, source, colors } = {}) {
+  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'word cloud', W = width, H = height - f.bottom, Tp = f.top + 2;
+  if (!words.length) return noData(W, height, f.deco, lab);
+  words.forEach((w, i) => { if (!fin(w.value) || w.value <= 0 || !String(w.text ?? '').trim()) throw new RangeError(`wordCloud word ${i} needs a text and a value above zero`); });
+  const sorted = [...words].sort((a, b) => b.value - a.value), hi = sorted[0].value, lo = sorted[sorted.length - 1].value;
+  const size = v => hi === lo ? (minSize + maxSize) / 2 : minSize + (maxSize - minSize) * Math.sqrt((v - lo) / (hi - lo));
+  const cx = W / 2, cy = Tp + (H - Tp) / 2, placed = [];
+  let g = '', omitted = 0;
+  sorted.forEach((w, i) => {
+    const fs = Math.round(size(w.value)), tw = String(w.text).length * fs * 0.58 + 6, th = fs * 1.12;
+    let box = null;
+    for (let t = 0; t < 1400 && !box; t++) {                 // Archimedean spiral, wider than tall like the plot
+      const a = t * 0.35, r = 1.6 * a, x = cx + r * Math.cos(a) * 1.5 - tw / 2, y = cy + r * Math.sin(a) * 0.8 - th / 2;
+      if (x < 2 || y < Tp || x + tw > W - 2 || y + th > H - 2) continue;
+      if (!placed.some(b => x < b.x + b.w && x + tw > b.x && y < b.y + b.h && y + th > b.y)) box = { x, y, w: tw, h: th };
+    }
+    if (!box) { omitted++; return; }
+    placed.push(box);
+    const col = pickColor(w.color, colors, [w.text], i < 3 ? palette(0) : palette(1 + (i % 4)));
+    g += `<text x="${round2(box.x + tw / 2)}" y="${round2(box.y + th * 0.78)}" text-anchor="middle" font-size="${fs}" ` +
+      `font-weight="${i < 3 ? 700 : 600}" fill="${col}" fill-opacity="${round2(i < 3 ? 1 : 0.55 + 0.45 * (fs - minSize) / ((maxSize - minSize) || 1))}">` +
+      `${esc(w.text)}<title>${esc(w.text)}: ${esc(fmtY(w.value))}</title></text>`;
+  });
+  return svg(W, height, f.deco + g, lab).replace('<svg ', `<svg data-omitted="${omitted}" `);
+}
+
 export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, hbarChart, donut, heatmap, sparkline,
-  groupedBars, stackedArea, slope, bullet, histogram, boxPlot, calendar, treemap, funnel, sankey, gauge, pareto,
+  groupedBars, stackedArea, slope, bullet, histogram, boxPlot, calendar, treemap, funnel, sankey, gauge, pareto, wordCloud,
   niceTicks, svg, esc, fin, palette };

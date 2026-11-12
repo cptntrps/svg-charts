@@ -1,6 +1,6 @@
 ---
 name: svg-charts
-description: Use when a page, report, or dashboard needs charts (line, area, stacked area, bar, grouped bar, horizontal bar, waterfall, pareto, scatter, diverging, dumbbell, slope, stacked, donut, treemap, heatmap, calendar, histogram, box plot, bullet, gauge, funnel, sankey, sparkline) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
+description: Use when a page, report, or dashboard needs charts (line, area, stacked area, bar, grouped bar, horizontal bar, waterfall, pareto, scatter, diverging, dumbbell, slope, stacked, donut, treemap, heatmap, calendar, histogram, box plot, bullet, gauge, funnel, sankey, word cloud, sparkline) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
 ---
 
 # svg-charts
@@ -86,6 +86,7 @@ options:
 | `sankey` | `flows:[{from,to,value}]` | two columns: where an amount comes from and where it goes |
 | `gauge` | `value`, `max`, `target?`, `caption?` | one value on its way to a limit or a goal |
 | `pareto` | `data:[{label,value}]` | ranked bars with the running share and an 80% rule |
+| `wordCloud` | `words:[{text,value}]`, `minSize?`, `maxSize?` | which words or names carry a body of text; no overlap, words without room are counted in `data-omitted` |
 
 `lineChart` takes `area: true` to fill under each series (volume over time). `waterfall` takes `zoom: true` to start the axis
 below the lowest level instead of at zero, so small steps between large totals stay visible. `hbarChart`, `donut`, `heatmap`
