@@ -367,3 +367,42 @@ test('hbarChart: diverging draws signed bars on both sides of a zero line', () =
   assert.ok(x('Shopping') < zero && Math.abs(x('Groceries') - zero) < 0.01, 'negative bar left of zero, positive from zero');
   assert.throws(() => charts.hbarChart({ data }), /diverging: true/);
 });
+
+// Builders added in 0.4.0.
+test('0.4.0 builders: each draws its marks and refuses values outside its domain', () => {
+  const count = (out, re) => (out.match(re) || []).length, F = fixtures;
+  assert.equal(count(charts.groupedBars(F.groupedBars), /<rect [^>]*><title>/g), 8);
+  assert.throws(() => charts.groupedBars({ categories: ['a'], series: [{ name: 's', values: [-1] }] }), RangeError);
+  assert.equal(count(charts.stackedArea(F.stackedArea), /<polygon /g), 3);
+  const sl = charts.slope(F.slope);
+  assert.equal(count(sl, /<line [^>]*stroke-width="2.2"/g), 5);
+  assert.ok(sl.includes('var(--chart-up') && sl.includes('var(--chart-down') && sl.includes('var(--chart-muted'), 'rise, fall and flat lines differ');
+  const bu = charts.bullet({ ...F.bullet, overColor: 'red' });
+  assert.equal(count(bu, /fill="red"/g), 2, 'the row over its target takes overColor on bar and text');
+  const hi = charts.histogram(F.histogram);
+  const heights = [...hi.matchAll(/<title>[^<]*: (\d+)<\/title>/g)].map(m => +m[1]);
+  assert.equal(heights.reduce((a, b) => a + b, 0), F.histogram.values.length, 'every value lands in one bin');
+  assert.ok(hi.includes('median 63'));
+  assert.throws(() => charts.histogram({ bins: [{ from: 2, to: 1, count: 1 }] }), RangeError);
+  const bx = charts.boxPlot(F.boxPlot);
+  assert.ok(bx.includes('median 6.65 h') && bx.includes('median 7.8 h'), 'quartiles from raw values and from a summary');
+  assert.throws(() => charts.boxPlot({ groups: [{ label: 'x', min: 2, q1: 1, median: 3, q3: 4, max: 5 }] }), RangeError);
+  const ca = charts.calendar(F.calendar);
+  assert.equal(count(ca, /<rect [^>]*><title>2026-/g), 84);
+  assert.equal(count(ca, /: no data<\/title>/g), F.calendar.days.filter(d => d.value == null).length);
+  assert.throws(() => charts.calendar({ days: [{ date: '11/12/2026', value: 1 }] }), RangeError);
+  const tm = charts.treemap(F.treemap);
+  const tiles = [...tm.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)].map(m => m.slice(1).map(Number));
+  assert.equal(tiles.length, 8);
+  const share = tiles[0][2] * tiles[0][3] / tiles.reduce((a, t) => a + t[2] * t[3], 0);
+  assert.ok(Math.abs(share - 584 / 914) < 0.03, 'tile area follows the value');
+  assert.throws(() => charts.treemap({ items: [{ label: 'a', value: 0 }] }), RangeError);
+  assert.ok(charts.funnel(F.funnel).includes('>3 · 3%<'), 'a stage shows its share of the first stage');
+  const sk = charts.sankey(F.sankey);
+  assert.equal(count(sk, /<path /g), 6); assert.equal(count(sk, /<rect /g), 6);
+  assert.throws(() => charts.sankey({ flows: [{ from: 'a', to: 'b', value: 0 }] }), RangeError);
+  assert.ok(charts.gauge(F.gauge).includes('stroke-dasharray="72 100"'));
+  assert.throws(() => charts.gauge({ value: 1, max: 0 }), RangeError);
+  const pa = charts.pareto({ ...F.pareto, data: [...F.pareto.data].reverse() });
+  assert.ok(pa.indexOf('Coffee:') < pa.indexOf('Milk:') && pa.includes('running share 100%'), 'sorted from the largest, ends at 100%');
+});

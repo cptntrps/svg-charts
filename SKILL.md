@@ -1,6 +1,6 @@
 ---
 name: svg-charts
-description: Use when a page, report, or dashboard needs charts (line, area, bar, horizontal bar, waterfall, scatter, diverging, dumbbell, stacked, donut, heatmap, sparkline) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
+description: Use when a page, report, or dashboard needs charts (line, area, stacked area, bar, grouped bar, horizontal bar, waterfall, pareto, scatter, diverging, dumbbell, slope, stacked, donut, treemap, heatmap, calendar, histogram, box plot, bullet, gauge, funnel, sankey, sparkline) without a charting library. Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
 ---
 
 # svg-charts
@@ -74,6 +74,18 @@ options:
 | `donut` | `slices:[{label,value,color?}]`, `centerValue?`, `centerLabel?` | shares of one total, six slices at most; the list gives value and share |
 | `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
 | `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
+| `groupedBars` | `categories:[...]`, `series:[{name,values:[...]}]` | two or three series side by side per category (this year against last year) |
+| `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]` | how a total and its parts move over time |
+| `slope` | `rows:[{label,a,b}]`, `aLabel`, `bLabel` | each item at two moments; rises, falls and flat lines take different colours |
+| `bullet` | `rows:[{label,value,target}]`, `overColor?` | a value against its target or budget, one row per item |
+| `histogram` | `values:[...]` with `bins: n`, or `bins:[{from,to,count}]`, `mark?:{value,text}` | how one measure is spread |
+| `boxPlot` | `groups:[{label,values:[...]}]` or `[{label,min,q1,median,q3,max}]` | spread per group: range, middle half, median |
+| `calendar` | `days:[{date:'YYYY-MM-DD',value}]` | one cell per day, weeks as columns: habits, streaks, seasons |
+| `treemap` | `items:[{label,value}]` | many parts of one total, area = value |
+| `funnel` | `stages:[{label,value}]` | how many remain at each stage, with the share of the first stage |
+| `sankey` | `flows:[{from,to,value}]` | two columns: where an amount comes from and where it goes |
+| `gauge` | `value`, `max`, `target?`, `caption?` | one value on its way to a limit or a goal |
+| `pareto` | `data:[{label,value}]` | ranked bars with the running share and an 80% rule |
 
 `lineChart` takes `area: true` to fill under each series (volume over time). `waterfall` takes `zoom: true` to start the axis
 below the lowest level instead of at zero, so small steps between large totals stay visible. `hbarChart`, `donut`, `heatmap`
