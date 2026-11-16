@@ -81,6 +81,7 @@ there.
 | `formatX` | the same for the x axis of `scatter` and `histogram` |
 | `label` | the accessible name; the claim when not given |
 | `width`, `height` | the size on a page; the caller and the slide box replace them |
+| `annotations` | callouts: `[{ "at": "Q3", "series": "This year", "text": "highest quarter" }]`. Each draws a ring on one data point and a few bold words beside it. `at` is the label of the item or the period; `series` is the name of the series when the chart has more than one |
 | the data fields | per chart type: see `references/chart-rules.md` and the builders table below |
 
 The code refuses a spec it cannot draw honestly, with a message that names the remedy:
@@ -91,6 +92,28 @@ The code refuses a spec it cannot draw honestly, with a message that names the r
 - a waterfall whose steps do not reach its total, a funnel stage larger than the stage before it;
 - on a slide (strict mode): no data, a label that is cut, labels that overlap, a treemap tile or a sankey
   node too small to show its name, a word without room, content taller than its box.
+
+### Callouts
+
+A callout draws the eye to the one data point that the claim rests on.
+
+| Chart | `at` names | `series` names | Where the callout points |
+|---|---|---|---|
+| `lineChart`, `stackedArea` | a period in `labels` | a series (`stackedArea`: the top edge of that series; the total when none is named) | the point |
+| `barChart`, `divergingBars`, `waterfall`, `pareto` | the label of a bar | | the end of the bar |
+| `hbarChart` | the label of a row | | the end of the bar; the words stand on the row, after the value |
+| `groupedBars` | a category | a series | the top of that bar |
+| `stackedBars` | a column | a key | the top of that segment |
+| `dumbbell` | a row | `aLabel` or `bLabel` | that end of the row |
+| `scatter` | (give `x` and `y`) | | the coordinate |
+
+1. One callout per chart is the rule. Three is the limit; the code refuses a fourth.
+2. The words say why the point matters ("highest quarter", "release"), in five words at most. Do not write
+   the value again when the chart already shows it.
+3. Point at data the claim or the section header names. A callout on another point pulls the reader away.
+4. A name that is not on the chart stops the run and lists the names the chart has.
+5. The other chart types take no callout: use `highlight` (`hbarChart`, `rankedTable`), `mark` (`histogram`)
+   or `colors` to make one item stand out.
 
 ## Rules for the agent
 
@@ -275,7 +298,7 @@ Common options:
 | `donut` | `slices:[{label,value,color?}]`, `centerValue?`, `centerLabel?` | shares of one total, six slices at most; the list gives value and share |
 | `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
 | `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
-| `groupedBars` | `categories:[...]`, `series:[{name,values:[...]}]` | two or three series side by side per category (this year against last year) |
+| `groupedBars` | `categories:[...]`, `series:[{name,values:[...]}]`, `annotations?` | two or three series side by side per category (this year against last year) |
 | `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]`, `totalLabels?` | how a total and its parts move over time |
 | `slope` | `rows:[{label,a,b}]`, `aLabel`, `bLabel` | each item at two moments; rises, falls and flat lines take different colours |
 | `bullet` | `rows:[{label,value,target}]`, `overColor?` | a value against its target or budget, one row per item |
@@ -286,7 +309,7 @@ Common options:
 | `funnel` | `stages:[{label,value}]` | how many remain at each stage, with the share of the first stage |
 | `sankey` | `flows:[{from,to,value}]` | two columns: where an amount comes from and where it goes |
 | `gauge` | `value`, `max`, `target?`, `caption?` | one value on its way to a limit or a goal |
-| `pareto` | `data:[{label,value}]` | ranked bars with the running share and an 80% rule |
+| `pareto` | `data:[{label,value}]`, `annotations?` | ranked bars with the running share and an 80% rule |
 | `wordCloud` | `words:[{text,value}]`, `minSize?`, `maxSize?` | which words or names carry a body of text; no overlap, words without room are counted in `data-omitted` |
 | `rankedTable` | `rows:[{label,value,cols?,note?,flag?}]`, `columns:[...]`, `valueLabel`, `total?`, `change?`, `format?`, `highlight?` | items ranked on one measure, with the exact values and the change beside each bar |
 
@@ -323,8 +346,15 @@ An annotation whose text equals the value label already on that point (a bar
 value, or a `valueLabels` point) keeps only the ring. The point is located per
 builder:
 
+In a direct call, an annotation gives positions: `index` and `series` are numbers. In a spec, give names with
+`at` and `series` (see "Callouts").
+
 | Builder | Annotation fields | Point |
 |---|---|---|
+| `groupedBars` | `index` (category), `series?` (default 0) | the top of that bar |
+| `stackedArea` | `index` (period), `series?` (default: the last, which is the total) | the top edge of that series |
+| `pareto` | `index` (the bar as drawn, from the largest) | the top of the bar |
+| `hbarChart` | `index` (row) | the end of the bar; the text stands on the row |
 | `lineChart` | `index`, `series?` (default 0) | the series point at `labels[index]` |
 | `barChart`, `waterfall` | `index` | the top of the bar |
 | `divergingBars` | `index` | the end of the bar (top for positive, bottom for negative) |

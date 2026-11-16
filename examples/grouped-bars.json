@@ -15,5 +15,8 @@
    "name": "This year",
    "values": [228, 251, 270, 248]
   }
+ ],
+ "annotations": [
+  { "at": "Q4", "series": "This year", "text": "below last year" }
  ]
 }

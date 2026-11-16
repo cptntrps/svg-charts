@@ -21,6 +21,6 @@
  ],
  "valueLabels": true,
  "annotations": [
-  { "index": 2, "text": "release" }
+  { "at": "Mar", "text": "release" }
  ]
 }
