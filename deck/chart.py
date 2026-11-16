@@ -131,6 +131,32 @@ def parse_path(d):
     return cmds
 
 
+def _contrast(a, b):
+    """WCAG contrast ratio of two RRGGBB colours."""
+    def lum(rgb):
+        ch = [int(rgb[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def theme_palette(slide, background, dark):
+    """The series colours of the deck: theme accents 1 to 6 in order, without the accents that are too close to the
+    slide background to read (contrast under 2 to 1: the light tints of a brand theme on a white slide). When fewer
+    than five stay, greys from the text colour fill the list. Returns RRGGBB values; [] when the theme cannot be read."""
+    master = slide.slide_layout.slide_master
+    back = background or ('000000' if dark else 'FFFFFF')
+    accents = [rt._theme_rgb(master, f'accent{i}') for i in range(1, 7)]
+    if not all(accents):
+        return []
+    keep = [c.upper() for c in accents if _contrast(c, back) >= 2]
+    if len(keep) == 6 or (len(keep) >= 5 and keep[:5] == [c.upper() for c in accents[:5]]):
+        return []                                           # every accent reads: keep the theme colours as theme colours
+    greys = ['B0B0B0', '6E6E6E', 'D0D0D0'] if dark else ['595959', '8C8C8C', 'B3B3B3']
+    return (keep + greys)[:5]
+
+
 class Canvas:
     """Writes SVG marks into one group of native shapes, at an offset, in the colours of the deck theme."""
 
@@ -617,9 +643,13 @@ def main(argv=None):
         prs, slide, box = rt.open_target(a, head)
         background = rt.background_rgb(prs, slide)
         dark = a.on == 'dark' if a.on else rt.is_dark(background)
+        if not palette:
+            palette = theme_palette(slide, background, dark)
         # The subtitle of a new deck stands under its title. In an existing slide it stands at the top of the box.
         box = rt.furnish(slide, box, a.subtitle if a.into else None, a.takeaway, dark, palette[0] if palette else None)
         receipt = {'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1}
+        if not (a.palette or a.accent) and palette:
+            receipt['palette'] = 'theme accents that read on this slide, then greys: ' + ','.join(palette)
         frame = 'none' if a.bare else 'full'          # each chart has its own title and its own source
         if many:
             charts = []

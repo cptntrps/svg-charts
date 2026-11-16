@@ -749,6 +749,7 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
         own = labelBox(x + (bw - 2) / 2, ly, t, 'middle', 10, 2); avoid.push(own);
       }
       tops.set(i + ':' + si, [x + (bw - 2) / 2, y, own, own ? t : undefined]);
+      avoid.push({ x0: x, x1: x + bw - 2, y0: y, y1: y + h, m: 2 });            // the words of a callout do not stand on a bar
     });
     g += axisText(L + i * gw + gw / 2, H - 12, 'middle', fit(c, gw - 2));
   });
@@ -1070,6 +1071,7 @@ export function pareto({ data = [], label, width = 600, height = 270, fmtY = num
     pts.map(p => `<circle cx="${round2(p[0])}" cy="${round2(p[1])}" r="3" fill="${INK}"/>`).join('');
   // A callout points at the top of a bar; `index` counts the bars as drawn, from the largest.
   const avoid = pts.slice(1).map((p, i) => segment(pts[i][0], pts[i][1], p[0], p[1], 6));
+  rows.forEach((d, i) => avoid.push({ x0: L + i * bw + bw * 0.14, x1: L + i * bw + bw * 0.86, y0: Y(d.value), y1: Y(0), m: 2 }));
   g += annotate(annotations, { W, L, R, top: 0, plotTop: Tp, bottom: H - B, avoid }, a => {
     const d = pick(rows, a.index, 'index');
     return [L + a.index * bw + bw * 0.5, Y(d.value)];
