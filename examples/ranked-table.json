@@ -1,0 +1,19 @@
+{
+  "claim": "Nordics spends the most on travel per revenue dollar, and its first-half rate fell",
+  "title": "Travel cost per revenue dollar",
+  "unit": "travel cost / revenue",
+  "source": "Sample ledger, FY 2025 and first halves",
+  "valueLabel": "FY 2025",
+  "columns": ["H1 2025", "H1 2026"],
+  "change": { "from": 0, "to": 1, "label": "Change (pp)" },
+  "format": { "decimals": 2, "suffix": "%" },
+  "rows": [
+    { "label": "Iberia", "value": 1.62, "cols": [1.48, 1.63] },
+    { "label": "Nordics", "value": 2.40, "cols": [2.52, 2.11] },
+    { "label": "Shared services", "value": null, "note": "$1.2M of cost, no revenue" },
+    { "label": "Alps", "value": 0.44, "cols": [0.47, 0.41] },
+    { "label": "Benelux", "value": 0.95, "cols": [1.31, 1.74],
+      "flag": "H1 2025 is above the full year. Check the H2 2025 booking before you present the change." }
+  ],
+  "total": { "label": "All regions", "value": 1.52, "cols": [1.60, 1.46] }
+}

@@ -422,3 +422,45 @@ test('wordCloud: no word overlaps another, the largest is the biggest, a word wi
   assert.ok(+crowded.match(/data-omitted="(\d+)"/)[1] > 0);
   assert.throws(() => charts.wordCloud({ words: [{ text: '', value: 1 }] }), RangeError);
 });
+
+// rankedTable (0.6.0): ranked bars with the exact values beside them; one spec for the page and the deck.
+test('rankedTable: rows rank by value, the note row and the total come last, bars follow the values', () => {
+  const F = fixtures.rankedTable, out = charts.rankedTable(F);
+  const order = [...out.matchAll(/<title>([^:<]+):/g)].map(m => m[1]);
+  assert.deepEqual(order, ['Nordics', 'Iberia', 'Benelux', 'Alps', 'Shared services', 'All regions']);
+  const bars = [...out.matchAll(/<rect x="[\d.]+" y="[\d.]+" width="([\d.]+)" height="14" rx="3" fill="([^"]+)"/g)];
+  assert.equal(bars.length, 5, 'four ranked rows and the total have a bar; the note row has none');
+  assert.ok(Math.abs(+bars[0][1] / +bars[1][1] - 2.40 / 1.62) < 0.01, 'bar width follows the value');
+  assert.ok(bars[4][2].startsWith('var(--chart-total'), 'the total bar takes the neutral colour');
+  assert.ok(out.includes('$1.2M of cost, no revenue') && (out.match(/>n\.a\.</g) || []).length === 3, 'the note row shows its note and n.a.');
+  assert.ok(out.includes('>▼ −0.41<') && out.includes('>▲ +0.15<') && out.includes('>▼ −0.14<'), 'change is the later column less the earlier one');
+  assert.ok(out.includes('>Benelux *<') && out.includes('>* Benelux: H1 2025 is above the full year.'), 'a flag marks the label and writes a footnote');
+  assert.equal((out.match(/stroke="var\(--chart-axis-text/g) || []).length, 5, 'the reference line marks the five rows that have a bar');
+  const flat = charts.rankedTable({ ...F, rows: [{ label: 'Flat', value: 1, cols: [1.2, 1.2] }], total: null });
+  assert.ok(flat.includes('>0.00<') && !flat.includes('▲') && !flat.includes('▼'), 'no mark when the change rounds to zero');
+});
+
+test('rankedTable: a narrow chart stacks label over bar; highlight mutes the other rows; sort: false keeps the order', () => {
+  const F = fixtures.rankedTable, narrow = charts.rankedTable({ ...F, width: 358 });
+  assert.ok(/<text x="4" y="[\d.]+" text-anchor="start"[^>]*>Nordics</.test(narrow), 'the label starts its own line');
+  assert.ok(!narrow.includes('stroke="var(--chart-axis-text'), 'no reference line across the labels');
+  assert.ok(+narrow.match(/viewBox="0 0 358 (\d+)"/)[1] > +charts.rankedTable(F).match(/viewBox="0 0 600 (\d+)"/)[1], 'stacked rows are taller');
+  const hl = charts.rankedTable({ ...F, highlight: ['Nordics'] });
+  assert.equal((hl.match(/fill="var\(--chart-muted/g) || []).length, 3);
+  assert.throws(() => charts.rankedTable({ ...F, highlight: ['Nowhere'] }), RangeError);
+  const kept = charts.rankedTable({ ...F, sort: false });
+  assert.ok(kept.indexOf('<title>Iberia:') < kept.indexOf('<title>Nordics:'));
+});
+
+test('rankedTable: a spec the chart cannot show honestly throws', () => {
+  const row = { label: 'a', value: 1, cols: [1, 2] }, base = { columns: ['x', 'y'], rows: [row] };
+  assert.throws(() => charts.rankedTable({ ...base, rows: [{ ...row, value: -1 }] }), /zero or more/);
+  assert.throws(() => charts.rankedTable({ ...base, rows: [{ label: 'b', value: null }] }), /needs a note/);
+  assert.throws(() => charts.rankedTable({ ...base, rows: [{ ...row, cols: [1] }] }), /cols needs 2/);
+  assert.throws(() => charts.rankedTable({ ...base, columns: ['w', 'x', 'y', 'z'] }), /at most 3/);
+  assert.throws(() => charts.rankedTable({ ...base, change: { from: 0, to: 2 } }), /positions in columns/);
+  assert.throws(() => charts.rankedTable({ ...base, total: { label: 't' } }), /total needs a value/);
+  assert.ok(charts.rankedTable({}).includes('no data'));
+  const neg = charts.rankedTable({ ...base, format: { decimals: 1, prefix: '$' }, rows: [{ label: 'a', value: 1, cols: [2, -4.1] }], change: { from: 0, to: 1 } });
+  assert.ok(neg.includes('>−$4.1<') && neg.includes('>▼ −6.1<'), 'a negative number in a column takes the minus sign of the change column');
+});

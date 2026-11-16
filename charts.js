@@ -1002,6 +1002,93 @@ export function wordCloud({ words = [], label, width = 600, height = 300, minSiz
   return svg(W, height, f.deco + g, lab).replace('<svg ', `<svg data-omitted="${omitted}" `);
 }
 
+// ---------- ranked table (ranked bars with the exact values beside them) ----------
+// rows: [{ label, value, cols?: [number|null, ...], note?, flag?, color? }]. The bar shows `value`; rows are sorted
+// from the largest (`sort: false` keeps the given order). `cols` holds one number per name in `columns` (3 at most).
+// A row with `value: null` has no bar: it shows its `note` (why there is no value) and comes after the ranked rows.
+// total: { label, value, cols } is the last row, under a rule, with a neutral bar and a reference line through the rows above.
+// change: { from, to, label?, decimals?, suffix? } adds a column: cols[to] less cols[from], marked ▲ or ▼.
+// flag: a caution about a row; the label takes a * and "* label: flag" is written under the table.
+// format: { decimals, prefix, suffix } is the JSON form of fmtY, so one spec file serves this builder and deck/ranked_table.py.
+// claim: the finding as one sentence, for the page heading and the slide title. The builder does not draw it.
+// Below 460px, or when the bars would get less than 80px, each label moves to its own line above its bar.
+// Footnotes are prose, so the wrap counts 0.54em per character (numbers and labels count 0.6em).
+const wrapText = (s, px, fs) => {
+  const max = Math.max(8, Math.floor(px / (fs * 0.54))), lines = []; let cur = '';
+  String(s).split(/\s+/).forEach(w => {
+    if (cur && (cur + ' ' + w).length > max) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w;
+  });
+  return cur ? lines.concat(cur) : lines;
+};
+export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', total = null, change = null, sort = true,
+  highlight = null, format = null, fmtY, label, width = 600, rowHeight = 34, title, unit, source, colors } = {}) {
+  const lab = label ?? title ?? 'ranked table', W = width, dec = format?.decimals ?? 0;
+  const fmt = fmtY || (format ? v => (v < 0 ? '−' : '') + (format.prefix ?? '') +
+    Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + (format.suffix ?? '') : num);
+  if (columns.length > 3) throw new RangeError('rankedTable holds the bar value and at most 3 more columns; put the rest in a table');
+  if (change && (columns[change.from] == null || columns[change.to] == null)) throw new RangeError('rankedTable change.from and change.to must be positions in columns');
+  if (total && !fin(total.value)) throw new RangeError('rankedTable total needs a value');
+  rows.concat(total ? [total] : []).forEach(r => {
+    const what = `rankedTable row "${r.label}"`;
+    if (r.value != null && (!fin(r.value) || r.value < 0)) throw new RangeError(`${what}: value must be a number of zero or more, or null with a note`);
+    if (r.value == null && !r.note) throw new RangeError(`${what}: a row without a value needs a note that says why`);
+    if (r.cols && r.cols.length !== columns.length) throw new RangeError(`${what}: cols needs ${columns.length} entries, one per column`);
+  });
+  if (highlight) highlight.forEach(n => { if (!rows.some(r => r.label === n)) throw new RangeError(`rankedTable highlight "${n}" is not a row label`); });
+  const ranked = sort ? rows.filter(r => r.value != null).sort((a, b) => b.value - a.value).concat(rows.filter(r => r.value == null)) : rows;
+  const list = ranked.concat(total ? [{ ...total, total: true }] : []);
+  const cd = change ? change.decimals ?? dec : 0;
+  const delta = r => {
+    const a = r.cols?.[change.from], b = r.cols?.[change.to];
+    if (!fin(a) || !fin(b)) return 'n.a.';
+    const d = b - a, eps = 0.5 / 10 ** cd;
+    return (d >= eps ? '▲ +' : d <= -eps ? '▼ −' : '') + Math.abs(d).toFixed(cd) + (change.suffix ?? '');
+  };
+  const heads = [valueLabel, ...columns, ...(change ? [change.label ?? 'Change'] : [])];
+  const cells = r => [r.value != null ? fmt(r.value) : '', ...columns.map((_, j) => fin(r.cols?.[j]) ? fmt(r.cols[j]) : 'n.a.'), ...(change ? [delta(r)] : [])];
+  const mark = r => r.label + (r.flag ? ' *' : '');
+  const cw = heads.map((h, j) => Math.ceil(Math.max(textW(h, 11), ...list.map(r => textW(cells(r)[j], 12)))) + 14);
+  const tableW = cw.reduce((a, b) => a + b, 0);
+  let nameW = Math.min(Math.ceil(Math.max(0, ...list.map(r => textW(mark(r), 12)))) + 12, Math.round(W * 0.34));
+  const stack = W < 460 || W - nameW - tableW - 8 < 80;
+  if (stack) nameW = 0;
+  const x0 = stack ? 4 : nameW, x1 = W - tableW - 8, edge = []; let acc = x1 + 8;
+  cw.forEach(w => { acc += w; edge.push(acc); });
+  const rh = stack ? rowHeight + 12 : rowHeight, bh = Math.max(6, Math.min(16, rowHeight - 20));
+  const bandTop = title != null || unit != null ? TOP_BAND : 0, T = bandTop + 26;
+  const notes = list.filter(r => r.flag).flatMap(r => wrapText(`* ${r.label}: ${r.flag}`, W - 8, 11));
+  const height = T + Math.max(1, list.length) * rh + 8 + (notes.length ? notes.length * 15 + 4 : 0) + (source != null ? BOTTOM_BAND : 0);
+  const f = frame({ title, unit, source, H: height });
+  if (!rows.length) return svg(W, height, f.deco + axisText(W / 2, T + 18, 'middle', 'no data'), lab);
+  const vmax = Math.max(...list.map(r => r.value ?? 0)) || 1, X = v => x0 + Math.max(1, x1 - x0) * v / vmax;
+  let g = heads.map((h, j) => axisText(edge[j], T - 12, 'end', h, 'font-size="11"')).join('') +
+    `<line x1="0" x2="${W}" y1="${T - 4}" y2="${T - 4}" stroke="${GRID}"/>`, hits = '', refs = '';
+  // The reference line marks the total on the rows that have a bar; it skips a row that shows a note.
+  const ref = total && !stack ? round2(X(total.value)) : null;
+  list.forEach((r, k) => {
+    const top = T + k * rh, yc = stack ? top + rh - rowHeight / 2 + 2 : top + rh / 2, c = cells(r);
+    const strong = r.total ? ' font-weight="700"' : '';
+    if (r.total) g += `<line x1="0" x2="${W}" y1="${top}" y2="${top}" stroke="${GRID}"/>`;
+    g += stack ? axisText(4, top + 15, 'start', fit(mark(r), W - 8), `fill="${INK}"${strong}`)
+      : axisText(nameW - 10, yc + 4, 'end', fit(mark(r), nameW - 12), `fill="${INK}"${strong}`);
+    if (ref != null && r.value != null) refs += `<line x1="${ref}" x2="${ref}" y1="${round2(k ? top : T - 4)}" y2="${round2(r.total ? yc - bh / 2 : top + rh)}" stroke="${AXIS}"/>`;
+    if (r.value != null) {
+      const col = r.total ? 'var(--chart-total,#8d979d)' : highlight && !highlight.includes(r.label) ? MUTED : pickColor(r.color, colors, [r.label], palette(0));
+      g += `<rect x="${round2(x0)}" y="${round2(yc - bh / 2)}" width="${round2(Math.max(1, X(r.value) - x0))}" height="${bh}" rx="3" fill="${col}"/>`;
+    } else if (stack) {                                         // the note follows the label on the label line
+      const nx = 4 + textW(mark(r), 12) + 8;
+      g += axisText(nx, top + 15, 'start', fit(r.note, W - nx - 4, 11), 'font-size="11"');
+    } else g += axisText(x0 + 6, yc + 4, 'start', fit(r.note, edge[0] - x0 - 6, 11), 'font-size="11"');
+    c.forEach((t, j) => {
+      if (t) g += axisText(edge[j], yc + 4, 'end', t, t === 'n.a.' ? '' : `fill="${INK}"` + (j === 0 || r.total ? ' font-weight="600"' : ''));
+    });
+    const tip = `${r.label}: ` + (r.value != null ? heads.map((h, j) => `${h} ${c[j]}`).join('; ') : r.note) + (r.flag ? `. ${r.flag}` : '');
+    hits += `<rect x="0" y="${round2(top)}" width="${W}" height="${rh}" fill-opacity="0"><title>${esc(tip)}</title></rect>`;
+  });
+  notes.forEach((t, i) => { g += axisText(4, T + list.length * rh + 20 + i * 15, 'start', t, 'font-size="11"'); });
+  return svg(W, height, f.deco + g + refs + hits, lab);
+}
+
 export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, hbarChart, donut, heatmap, sparkline,
-  groupedBars, stackedArea, slope, bullet, histogram, boxPlot, calendar, treemap, funnel, sankey, gauge, pareto, wordCloud,
+  groupedBars, stackedArea, slope, bullet, histogram, boxPlot, calendar, treemap, funnel, sankey, gauge, pareto, wordCloud, rankedTable,
   niceTicks, svg, esc, fin, palette };

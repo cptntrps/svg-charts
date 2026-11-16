@@ -44,10 +44,11 @@ OS between light and dark to see the theme follow.</p>
 <div class="card"><h2>dumbbell</h2><div id="db"></div></div>
 <div class="card"><h2>stackedBars</h2><div id="st"></div></div>
 <div class="card"><h2>title, unit, source and a callout</h2><div id="framed"></div></div>
+<div class="card"><h2>rankedTable (one spec file for the page and the deck)</h2><div id="rt"></div></div>
 <div class="card"><h2>legend, one colour per name, value labels</h2><div id="legend"></div><div id="legend2"></div></div>
 
 <script type="module">
-import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars } from './charts.js';
+import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, rankedTable } from './charts.js';
 
 const months = ['Jan','Feb','Mar','Apr','May','Jun'];
 const usd = v => '$' + v + 'k';
@@ -133,6 +134,14 @@ document.getElementById('legend2').innerHTML = barChart({
     { label: 'Email', value: 640, series: 'Product A' }, { label: 'Direct', value: 980, series: 'Product B' },
   ],
 });
+
+// The spec file is the one deck/ranked_table.py reads. The chart is drawn to the width of its card,
+// so a narrow page gets the stacked layout.
+const rt = document.getElementById('rt');
+fetch('./examples/ranked-table.json').then(r => r.json()).then(spec => {
+  const draw = () => { rt.innerHTML = rankedTable({ ...spec, width: Math.max(280, rt.clientWidth) }); };
+  draw(); new ResizeObserver(draw).observe(rt);
+}).catch(e => { rt.textContent = 'rankedTable: the spec did not load (' + e.message + ')'; });
 </script>
 </div>
 </body>

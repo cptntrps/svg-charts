@@ -132,4 +132,14 @@ export const fixtures = {
       ['praia', 16], ['presente', 14], ['carro', 13], ['médico', 12], ['feriado', 11], ['pizza', 10], ['filme', 9], ['escola', 8], ['chuva', 7], ['academia', 6]]
       .map(([text, value]) => ({ text, value })),
   },
+  rankedTable: {
+    label: 'Travel cost per revenue dollar by region', valueLabel: 'FY 2025', columns: ['H1 2025', 'H1 2026'],
+    change: { from: 0, to: 1, label: 'Change (pp)' }, format: { decimals: 2, suffix: '%' },
+    rows: [
+      { label: 'Iberia', value: 1.62, cols: [1.48, 1.63] }, { label: 'Nordics', value: 2.40, cols: [2.52, 2.11] },
+      { label: 'Shared services', value: null, note: '$1.2M of cost, no revenue' }, { label: 'Alps', value: 0.44, cols: [0.47, 0.41] },
+      { label: 'Benelux', value: 0.95, cols: [1.31, 1.74], flag: 'H1 2025 is above the full year. Check the H2 2025 booking.' },
+    ],
+    total: { label: 'All regions', value: 1.52, cols: [1.60, 1.46] },
+  },
 };

@@ -17,7 +17,7 @@ so a whole report can be one self-contained file with no external chart runtime.
 
 `lineChart` (with `area`), `barChart`, `hbarChart`, `waterfall`, `scatter`, `divergingBars`, `dumbbell`,
 `stackedBars`, `donut`, `heatmap`, `sparkline`, `groupedBars`, `stackedArea`, `slope`, `bullet`, `histogram`,
-`boxPlot`, `calendar`, `treemap`, `funnel`, `sankey`, `gauge`, `pareto`, `wordCloud`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
+`boxPlot`, `calendar`, `treemap`, `funnel`, `sankey`, `gauge`, `pareto`, `wordCloud`, `rankedTable`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
 
 ## Use
 
@@ -48,6 +48,19 @@ barChart({
 });
 ```
 
+## One spec for the page and the deck
+
+`rankedTable` (ranked bars with the exact values beside them) reads a plain JSON spec.
+[`deck/ranked_table.py`](./deck/ranked_table.py) draws the same file as native, editable PowerPoint shapes
+that take the colours and fonts of the deck theme (needs `python-pptx`):
+
+```sh
+python3 deck/ranked_table.py examples/ranked-table.json --out chart.pptx
+python3 deck/ranked_table.py examples/ranked-table.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+```
+
+[`SKILL.md`](./SKILL.md) has the spec, the rules for an agent and the checks.
+
 Open [`demo.html`](./demo.html) for every chart with sample data in light and
 dark mode. The full option reference is in [`SKILL.md`](./SKILL.md).
 
@@ -55,6 +68,7 @@ dark mode. The full option reference is in [`SKILL.md`](./SKILL.md).
 
 ```sh
 npm test
+python3 -m unittest deck/test_ranked_table.py   # needs python-pptx
 ```
 
 The suite (node:test, no dependencies) checks every builder against a stored
