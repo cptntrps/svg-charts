@@ -1358,6 +1358,13 @@ export function chart(spec, { width, height, strict = false, bare = false } = {}
   if (strict) {
     const texts = [...out.matchAll(/<text\b[^>]*>(.*?)<\/text>/g)].map(m => m[1].replace(/<title>.*?<\/title>/g, '').replace(/<[^>]+>/g, ''));
     if (texts.includes('no data')) throw new RangeError(`${what}: the spec has no data to draw`);
+    // A plot that is too low to read: the value axis must have 60px between its lowest and its highest gridline.
+    const gridYs = [...out.matchAll(/<line x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="\1" stroke="var\(--chart-(?:grid|ink)/g)].map(m => +m[1]);
+    const plotH = gridYs.length > 1 ? Math.max(...gridYs) - Math.min(...gridYs) : null;
+    if ((plotH != null && plotH < 60) || (type.height && H != null && H < 110 && what !== 'sparkline')) {
+      throw new RangeError(`${what}: the box is too low: ` + (plotH != null && plotH < 60 ? `the plot gets ${Math.max(0, Math.round(plotH))}px of height and needs 60` : `the chart has ${H}px of height and needs 110`) +
+        '. Give the chart a taller box, put fewer things on the slide, or leave out the legend');
+    }
     const said = JSON.stringify(spec), cut = texts.find(t => /…/.test(t) && !said.includes(t.replace(/&amp;/g, '&')));
     if (cut) throw new RangeError(`${what}: the label "${cut}" is cut: shorten it, use fewer items or give the chart more width`);
     const omitted = +(out.match(/data-omitted="(\d+)"/)?.[1] ?? 0);
