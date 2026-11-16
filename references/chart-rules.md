@@ -153,7 +153,8 @@ Spec: `labels: [the periods in order]`, `series: [{ name, points: [{ x, y }], da
 4. Use `valueLabels` for one series of 8 points at most. With more, use `annotations` on the points the
    claim names.
 5. Use `target` only when the claim compares the line with it.
-6. Set `legend: true` when there are two or more series.
+6. Set `legend` when there are two or more series: `true` (under the title), or `"right"` on a wide chart,
+   where each name stands beside the end of its line.
 7. Use `area: true` for one series of a volume (orders, visits). Use `stackedArea` for parts of a total.
 
 ## sparkline

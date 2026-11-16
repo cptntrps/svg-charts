@@ -99,19 +99,38 @@ const pickColor = (explicit, colors, names, fallback) =>
 // marker) in the entry colour and its name in 12px axis text, wrapped to the
 // chart width. Returns the svg and the height the plot gives up.
 const LEGEND_ROW = 16;
+const legendEntry = (e, x, y) =>
+  (e.marker === 'hollow' ? `<circle cx="${round2(x + 7)}" cy="${round2(y + 8)}" r="4" fill="var(--chart-paper,#fff)" stroke="${e.color}" stroke-width="2"/>`
+    : e.marker === 'filled' ? `<circle cx="${round2(x + 7)}" cy="${round2(y + 8)}" r="4" fill="${e.color}"/>`
+    : `<rect x="${round2(x)}" y="${round2(y + 6.5)}" width="14" height="3" rx="1.5" fill="${e.color}"/>`) +
+  `<text x="${round2(x + 20)}" y="${round2(y + 12)}" font-size="12" fill="${AXIS}">${esc(e.name)}</text>`;
 function legendRows(entries, W, y0) {
   let x = 4, row = 0, out = '';
   entries.forEach(e => {
     const w = 20 + textW(e.name, 12);
     if (x > 4 && x + w > W - 4) { x = 4; row++; }
-    const y = y0 + row * LEGEND_ROW;
-    out += e.marker === 'hollow' ? `<circle cx="${x + 7}" cy="${y + 8}" r="4" fill="var(--chart-paper,#fff)" stroke="${e.color}" stroke-width="2"/>`
-      : e.marker === 'filled' ? `<circle cx="${x + 7}" cy="${y + 8}" r="4" fill="${e.color}"/>`
-      : `<rect x="${x}" y="${y + 6.5}" width="14" height="3" rx="1.5" fill="${e.color}"/>`;
-    out += `<text x="${x + 20}" y="${y + 12}" font-size="12" fill="${AXIS}">${esc(e.name)}</text>`;
+    out += legendEntry(e, x, y0 + row * LEGEND_ROW);
     x += w + 16;
   });
   return { svg: out, height: entries.length ? (row + 1) * LEGEND_ROW + 2 : 0 };
+}
+// The legend at a position: `true` or 'top' (rows under the title band), 'bottom' (rows under the plot, above the
+// source) or 'right' (one entry per line beside the plot). Returns the svg and the room the plot gives up:
+// height (at the top), bottom and right. topY is the y under the title band; bottomY is the y where the bottom
+// rows end, or a function of the room when the chart height follows from it.
+function legendAt(pos, entries, W, topY, bottomY) {
+  const none = { svg: '', height: 0, bottom: 0, right: 0 };
+  if (!entries.length) return none;
+  if (pos === true || pos === 'top') return { ...none, ...legendRows(entries, W, topY) };
+  if (pos === 'bottom') {
+    const h = legendRows(entries, W, 0).height + 4, room = { ...none, bottom: h };
+    return { ...room, svg: legendRows(entries, W, (typeof bottomY === 'function' ? bottomY(room) : bottomY) - h + 4).svg };
+  }
+  if (pos === 'right') {
+    const w = Math.ceil(Math.max(...entries.map(e => 20 + textW(e.name, 12)))) + 10;
+    return { ...none, right: w, svg: entries.map((e, i) => legendEntry(e, W - w + 8, topY + 8 + i * LEGEND_ROW)).join('') };
+  }
+  throw new RangeError('legend must be true, false, "top", "bottom" or "right"');
 }
 // Legend entries for bar-type data that names a `series` per item; empty otherwise.
 function seriesLegend(items, colors) {
@@ -220,10 +239,12 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
   target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false, area = false } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'line chart';
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
-  const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], band = {}, W = width;
+  const lastY = s => s.points.map(p => p.y).filter(fin).at(-1) ?? -Infinity;
+  const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si), end: lastY(s) })) : [], band = {}, W = width;
+  if (legend === 'right') entries.sort((a, b) => b.end - a.end);          // beside the plot, the order of the line ends
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 54, R = 16, Tp = 14 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 54, R = 16 + lg.right, Tp = 14 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom - lg.bottom;
     const ys = series.flatMap(s => s.points.map(p => p.y)).filter(fin);
     if (!ys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     let ymax = Math.max(...ys) * 1.1;
@@ -289,8 +310,8 @@ export function barChart({ data = [], label, width = 600, height = 260,
   const colorOf = (d, i) => pickColor(d.color, colors, [d.label, d.series],
     d.series != null ? groups.find(e => e.name === d.series).color : palette(i));
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 54, R = 14, Tp = 16 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom - lg.bottom;
     const vals = data.map(d => d.value).filter(fin);
     if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
@@ -331,8 +352,8 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'waterfall';
   const groups = seriesLegend(items, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 54, R = 10, Tp = 18 + f.top + extraTop + lg.height, B = 46, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 54, R = 10 + lg.right, Tp = 18 + f.top + extraTop + lg.height, B = 46, H = height - f.bottom - lg.bottom;
     const bars = []; let run = 0;
     for (const it of items) {
       if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value, it }); run = it.value; }
@@ -378,8 +399,8 @@ export function scatter({ groups = [], label, width = 600, height = 330,
   const colorOf = (gr, gi) => pickColor(gr.color, colors, [gr.name], palette(gi));
   const entries = legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], band = {}, W = width;
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 54, R = 16, Tp = 22 + f.top + extraTop + lg.height, B = 38, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 54, R = 16 + lg.right, Tp = 22 + f.top + extraTop + lg.height, B = 38, H = height - f.bottom - lg.bottom;
     const pts = groups.flatMap(g => g.points || []);
     if (!pts.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const xt = niceTicks(0, Math.max(...pts.map(p => p.x)) * 1.05), XM = xt[xt.length - 1] || 1;
@@ -414,8 +435,8 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'change';
   const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 54, R = 14, Tp = 16 + f.top + extraTop + lg.height, B = 20, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 20, H = height - f.bottom - lg.bottom;
     const vals = data.map(d => d.value).filter(fin);
     if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const lo = Math.min(0, ...vals) * 1.12, hi = Math.max(0, ...vals) * 1.12;
@@ -457,12 +478,12 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
   const vals = rows.flatMap(r => [r.a, r.b]).filter(fin);
   // The body returns the whole svg: the height depends on the band row too.
   const body = extraTop => {
-    const lg = legendRows(entries, W, bandTop + extraTop);
-    const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + (source != null ? BOTTOM_BAND : 0) , W: width });
+    const lg = legendAt(legend, entries, W, bandTop + extraTop, room => plotH + bandTop + extraTop + room.height + room.bottom);
+    const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + lg.bottom + (source != null ? BOTTOM_BAND : 0), W: width });
     const deco = f.deco + lg.svg;
     // The label column is 150px; in a narrow chart it is as wide as the longest label, so the rows keep room.
     const L = W < 460 ? Math.min(150, Math.ceil(Math.max(0, ...rows.map(r => textW(r.label, 12)))) + 18) : 150;
-    const R = 20, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + f.bottom;
+    const R = 20 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + lg.bottom + f.bottom;
     if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
     const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
     const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
@@ -493,9 +514,10 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked';
   const colorOf = (k, ki) => (Array.isArray(colors) ? colors[ki] : colors[k]) || palette(ki);
   const entries = legend ? keys.map((k, ki) => ({ name: k, color: colorOf(k, ki) })) : [], band = {}, W = width;
+  if (legend === 'right') entries.reverse();                              // beside the plot, the order of the stack
   const body = extraTop => {
-    const lg = legendRows(entries, W, f.top + extraTop);
-    const L = 44, R = 14, Tp = 14 + f.top + extraTop + lg.height, B = 30, H = height - f.bottom;
+    const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
+    const L = 44, R = 14 + lg.right, Tp = 14 + f.top + extraTop + lg.height, B = 30, H = height - f.bottom - lg.bottom;
     if (!columns.length || !keys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const totals = columns.map(c => keys.reduce((a, k) => a + (c.parts[k] || 0), 0));
     const norm = columns.map((c, i) => totals[i] > 0 ? totals[i] : 1);
@@ -540,9 +562,10 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   const lab = label ?? title ?? 'bar chart', W = width;
   const groups = seriesLegend(data, colors), entries = legend ? groups : [];
   const bandTop = topBand(title, unit, width);
-  const lg = legendRows(entries, W, bandTop);
-  const Tp = bandTop + lg.height + 6, plotH = Math.max(1, data.length) * rowHeight;
-  const height = Tp + plotH + 6 + (source != null ? BOTTOM_BAND : 0);
+  const plotH = Math.max(1, data.length) * rowHeight;
+  const lg = legendAt(legend, entries, W, bandTop, room => bandTop + room.height + 6 + plotH + 6 + room.bottom);
+  const Tp = bandTop + lg.height + 6;
+  const height = Tp + plotH + 6 + lg.bottom + (source != null ? BOTTOM_BAND : 0);
   const f = frame({ title, unit, source, H: height , W: width });
   const vals = data.map(d => d.value);
   if (!vals.length) return svg(W, height + 24, f.deco + lg.svg + axisText(W / 2, Tp + 18, 'middle', 'no data'), lab);
@@ -554,7 +577,7 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   const text = d => diverging ? (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)) : fmtY(d.value);
   const side = keep => Math.max(0, ...data.filter(keep).map(d => textW(text(d), 12))) + 10;
   const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = (hi - lo) || 1;
-  const x0 = L + (lo < 0 ? side(d => d.value < 0) : 0), x1 = W - side(d => d.value >= 0);
+  const x0 = L + (lo < 0 ? side(d => d.value < 0) : 0), x1 = W - lg.right - side(d => d.value >= 0);
   const X = v => x0 + (v - lo) / span * (x1 - x0), zero = X(0);
   let g = diverging ? `<line x1="${round2(zero)}" x2="${round2(zero)}" y1="${Tp}" y2="${Tp + plotH}" stroke="${INK}" stroke-width="1.2"/>` : '';
   data.forEach((d, i) => {
@@ -673,8 +696,8 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
   title, unit, source, legend = true, colors, valueLabels = true } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'grouped bars', W = width;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
-  const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top);
-  const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 34, H = height - f.bottom;
+  const lg = legendAt(legend, legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top, height - f.bottom);
+  const L = 54, R = 14 + lg.right, Tp = 16 + f.top + lg.height, B = 34, H = height - f.bottom - lg.bottom;
   const vals = series.flatMap(s => s.values || []).filter(v => v != null);
   if (!vals.length || !categories.length) return noData(W, height, f.deco + lg.svg, lab);
   vals.forEach((v, i) => nonNeg(v, `groupedBars value ${i}`));
@@ -702,8 +725,10 @@ export function stackedArea({ labels = [], series = [], label, width = 600, heig
   title, unit, source, legend = true, colors, totalLabels = false } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked area', W = width;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
-  const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top);
-  const L = 54, R = 16, Tp = 14 + f.top + lg.height, B = 34, H = height - f.bottom;
+  const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [];
+  if (legend === 'right') entries.reverse();                              // beside the plot, the order of the stack
+  const lg = legendAt(legend, entries, W, f.top, height - f.bottom);
+  const L = 54, R = 16 + lg.right, Tp = 14 + f.top + lg.height, B = 34, H = height - f.bottom - lg.bottom;
   if (labels.length < 2 || !series.length) return noData(W, height, f.deco + lg.svg, lab);
   series.forEach((s, si) => labels.forEach((_, i) => nonNeg(s.values[i] ?? 0, `stackedArea series ${si} value ${i}`)));
   const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] ?? 0), 0));
