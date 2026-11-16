@@ -327,8 +327,8 @@ def list_shapes(path, slide_no):
          'text': (s.text_frame.text[:60] if s.has_text_frame else '')} for s in slide.shapes]}, indent=1))
 
 
-def add_target_args(ap):
-    ap.add_argument('spec', nargs='?')
+def add_target_args(ap, many=False):
+    ap.add_argument('spec', nargs='*' if many else '?')
     ap.add_argument('--out')
     ap.add_argument('--into')
     ap.add_argument('--slide', type=int, default=1)

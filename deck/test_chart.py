@@ -174,6 +174,55 @@ class ChartDeck(unittest.TestCase):
             self.assertIn(text, err)
             self.assertFalse(out.exists(), 'nothing is written when a gate fails')
 
+    def test_two_and_three_charts_stand_side_by_side_with_their_claims(self):
+        ex = ROOT / 'examples'
+        out = self.dir / 'two.pptx'
+        code, receipt, err = run(ex / 'line-chart.json', ex / 'hbar-chart.json', '--out', out, '--title', 'Two findings on one slide')
+        self.assertEqual(code, 0, err)
+        slide = Presentation(out).slides[0]
+        self.assertEqual(texts(slide.shapes)[0], 'Two findings on one slide')
+        groups = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.GROUP]
+        claims = [s for s in slide.shapes if s.name.startswith('Claim ')]
+        self.assertEqual([g.name for g in groups], ['Chart lineChart', 'Chart hbarChart'])
+        self.assertEqual([c.text_frame.text for c in claims], [json.loads((ex / f).read_text(encoding='utf-8'))['claim'] for f in ('line-chart.json', 'hbar-chart.json')])
+        self.assertLessEqual(groups[0].left + groups[0].width, groups[1].left, 'the charts do not overlap')
+        self.assertEqual(claims[0].top, claims[1].top)
+        self.assertLessEqual(claims[0].top + claims[0].height, min(g.top for g in groups) + 6 * PT, 'each claim stands above its chart')
+        boxes = [c['box_pt'] for c in json.loads(receipt)['charts']]
+        self.assertAlmostEqual(boxes[0][2], boxes[1][2])
+        self.assertAlmostEqual(boxes[1][0] - boxes[0][0] - boxes[0][2], ch.GUTTER)
+
+        deck, out3 = self.base_deck(dark=True), self.dir / 'three.pptx'
+        code, receipt, err = run(ex / 'dumbbell.json', ex / 'box-plot.json', ex / 'bullet.json', '--into', deck, '--replace', 'Chart area', '--out', out3)
+        self.assertEqual(code, 0, err)
+        slide = Presentation(out3).slides[0]
+        groups = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.GROUP]
+        self.assertEqual(len(groups), 3)
+        for a, b in zip(groups, groups[1:]):
+            self.assertLessEqual(a.left + a.width, b.left)
+        self.assertGreaterEqual(groups[0].left, 40 * PT - PT)
+        self.assertLessEqual(groups[2].left + groups[2].width, 920 * PT + PT)
+        claim = next(s for s in slide.shapes if s.name == 'Claim dumbbell')
+        self.assertEqual(str(claim.text_frame.paragraphs[0].runs[0].font.color.rgb), 'FFFFFF')
+
+    def test_a_shared_slide_refuses_what_does_not_fit_in_a_column(self):
+        ex, out = ROOT / 'examples', self.dir / 'x.pptx'
+        cases = (
+            ((ex / 'line-chart.json', ex / 'hbar-chart.json', '--out', out), 'needs its own claim: give --title'),
+            ((ex / 'line-chart.json', '--out', out, '--title', 'x'), '--title is for a slide with two or three charts'),
+            ((ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', ex / 'bullet.json', '--out', out, '--title', 'x'), 'a slide holds 3 at most'),
+            ((ex / 'gauge.json', ex / 'ranked-table.json', ex / 'slope.json', '--out', out, '--title', 'x'), 'shorten the label or widen the box'),
+            ((ex / 'gauge.json', ex / 'sparkline.json', '--out', out, '--title', 'x'), 'a sparkline is not a chart of its own'),
+        )
+        for args, text in cases:
+            code, _, err = run(*args)
+            self.assertEqual(code, 2, text)
+            self.assertIn(text, err)
+            self.assertFalse(out.exists(), 'nothing is written when one chart does not fit')
+        code, receipt, _ = run(ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', '--check', '--title', 'x')
+        self.assertEqual(code, 0)
+        self.assertEqual([c['chart'] for c in json.loads(receipt)['charts']], ['gauge', 'funnel', 'slope'])
+
     def test_check_reports_the_fit_without_a_deck(self):
         code, receipt, _ = run(ROOT / 'examples' / 'heatmap.json', '--check')
         self.assertEqual(code, 0)

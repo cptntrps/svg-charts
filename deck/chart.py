@@ -9,6 +9,9 @@
       the chart takes the box of that shape on slide 3 and the shape is removed
   python3 deck/chart.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 --out deck2.pptx
       the chart inside a box (x,y,w,h in points)
+  python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim of the slide"
+  python3 deck/chart.py a.json b.json --into deck.pptx --slide 3 --replace "Content Placeholder 2" --out deck2.pptx
+      two or three charts side by side in equal columns, each with its own claim above it
   python3 deck/chart.py --list deck.pptx --slide 3
       the shapes on a slide with their boxes, to choose --box or --replace
 
@@ -400,11 +403,72 @@ def draw_svg(slide, drawn, box, palette=None, dark=False, background=None):
     return canvas
 
 
+GUTTER = 24                 # points between two charts on one slide
+HEAD_FS, HEAD_LINE = 13, 17  # the claim above each chart when a slide holds two or three
+
+
+def load(path):
+    try:
+        with open(path, encoding='utf-8') as fh:
+            spec = json.load(fh)
+    except (OSError, json.JSONDecodeError) as e:
+        raise SpecError(f'{path}: {e}')
+    if not isinstance(spec, dict) or not spec.get('chart'):
+        raise SpecError(f'{path}: the spec needs "chart": the name of the chart type (see SKILL.md)')
+    return spec
+
+
+def fit(path, spec, box, framed):
+    """Check one chart against a box without a deck. Returns the receipt fields."""
+    if spec['chart'] == 'rankedTable':
+        rows, heads = rt.model(spec)
+        band = (22 if framed and (spec.get('title') or spec.get('unit')) else 0) + (16 if framed and spec.get('source') else 0)
+        rt.layout(spec, [box[0], box[1], box[2], box[3] - band])
+        return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'rows': [r['label'] for r in rows], 'columns': heads}
+    d = render(path, box[2], box[3], bare=not framed)
+    return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'used_pt': [d['width'], d['height']]}
+
+
+def place(slide, path, spec, box, framed, palette, dark, background):
+    """Draw one chart into a box of the slide. Returns the receipt fields."""
+    out = {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box]}
+    if spec['chart'] == 'rankedTable':
+        g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame=framed)
+        out.update(used_height_pt=round(g['height'], 1), rows=[r['label'] for r in g['rows']])
+    else:
+        d = render(path, box[2], box[3], bare=not framed)
+        canvas = draw_svg(slide, d, box, palette, dark, background)
+        out.update(used_pt=[d['width'], d['height']], shapes=canvas.count)
+    return out
+
+
+def side_by_side(specs, box):
+    """Two or three charts in equal columns of the box. Each column has the claim of its chart above the chart.
+    Returns per chart (claim lines, claim box, chart box)."""
+    n = len(specs)
+    w = (box[2] - GUTTER * (n - 1)) / n
+    heads = []
+    for path, spec in specs:
+        if not spec.get('claim'):
+            raise SpecError(f'{path}: each chart on a shared slide has its claim above it: add "claim" to the spec')
+        if spec['chart'] == 'sparkline':
+            raise SpecError(f'{path}: a sparkline is not a chart of its own: use --into with a small --box beside the number it supports')
+        lines = rt.wrap(spec['claim'], w, HEAD_FS, 0.56)
+        if len(lines) > 3:
+            raise SpecError(f'{path}: the claim needs {len(lines)} lines at {HEAD_FS}pt in a {w:.0f}pt column, it has 3: shorten it')
+        heads.append(lines)
+    head_h = HEAD_LINE * max(len(h) for h in heads) + 8
+    return [(heads[i], [box[0] + i * (w + GUTTER), box[1], w, head_h], [box[0] + i * (w + GUTTER), box[1] + head_h, w, box[3] - head_h])
+            for i in range(n)]
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='Any svg-charts chart as native PowerPoint shapes.')
-    rt.add_target_args(ap)
+    ap = argparse.ArgumentParser(description='Any svg-charts chart as native PowerPoint shapes. Give two or three spec files '
+                                             'to draw them side by side on one slide.')
+    rt.add_target_args(ap, many=True)
     ap.add_argument('--palette', help='RRGGBB,RRGGBB,... in place of theme accents 1 to 5')
-    ap.add_argument('--bare', action='store_true', help='with --into: leave out the title, unit and source lines of the chart')
+    ap.add_argument('--bare', action='store_true', help='leave out the title, unit and source lines of the chart')
+    ap.add_argument('--title', help='with two or three specs and --out alone: the claim of the slide')
     a = ap.parse_args(argv)
     try:
         if a.list:
@@ -412,47 +476,58 @@ def main(argv=None):
             return 0
         if not a.spec:
             raise SpecError('give a spec file')
-        try:
-            with open(a.spec, encoding='utf-8') as fh:
-                spec = json.load(fh)
-        except (OSError, json.JSONDecodeError) as e:
-            raise SpecError(f'{a.spec}: {e}')
-        kind = spec.get('chart') if isinstance(spec, dict) else None
-        if not kind:
-            raise SpecError('the spec needs "chart": the name of the chart type (see SKILL.md)')
+        if len(a.spec) > 3:
+            raise SpecError(f'{len(a.spec)} charts: a slide holds 3 at most. Use two slides, or one chart with more series')
+        specs = [(path, load(path)) for path in a.spec]
         palette = [c.strip().lstrip('#').upper() for c in (a.palette or a.accent or '').split(',') if c.strip()]
         if any(not re.fullmatch(r'[0-9A-F]{6}', c) for c in palette):
             raise SpecError('--palette and --accent take colours as RRGGBB')
-        ranked = kind == 'rankedTable'
+        many = len(specs) > 1
+        path, spec = specs[0]
+        if many and not a.into and not a.title and (a.out or not a.box):
+            raise SpecError('a slide with two or three charts needs its own claim: give --title "<one sentence>"')
+        if a.title and not many:
+            raise SpecError('--title is for a slide with two or three charts; one chart takes its title from "claim"')
+        head = {'claim': a.title} if many else spec
         if a.check:
-            box = rt.parse_box(a.box) if a.box else rt.new_deck_box(spec)[3]
-            if ranked:
-                rows, heads = rt.model(spec)
-                rt.layout(spec, box)
-                print(json.dumps({'ok': True, 'chart': kind, 'box_pt': box, 'rows': [r['label'] for r in rows], 'columns': heads}))
+            box = rt.parse_box(a.box) if a.box else rt.new_deck_box(head)[3]
+            if many:
+                cols = side_by_side(specs, box)
+                print(json.dumps({'ok': True, 'charts': [fit(p, s, c[2], not a.bare) for (p, s), c in zip(specs, cols)]}))
             else:
-                d = render(a.spec, box[2], box[3], bare=not a.box)
-                print(json.dumps({'ok': True, 'chart': kind, 'box_pt': box, 'used_pt': [d['width'], d['height']]}))
+                print(json.dumps(dict(ok=True, **fit(path, spec, box, bool(a.box) and not a.bare))))
             return 0
         if not a.out:
             raise SpecError('give --out')
-        if not a.into:
+        if not a.into and not many:
             if not spec.get('claim'):
                 raise SpecError('the slide title is the claim: add "claim" to the spec, one sentence with the finding')
-            if kind == 'sparkline':
+            if spec['chart'] == 'sparkline':
                 raise SpecError('a sparkline is not a slide of its own: use --into with a small --box beside the number it supports')
-        prs, slide, box = rt.open_target(a, spec)
+        prs, slide, box = rt.open_target(a, head)
         background = rt.background_rgb(prs, slide)
         dark = a.on == 'dark' if a.on else rt.is_dark(background)
-        framed = bool(a.into) and not a.bare
-        receipt = {'ok': True, 'out': a.out, 'chart': kind, 'slide': a.slide if a.into else 1, 'box_pt': [round(v, 1) for v in box]}
-        if ranked:
-            g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame=framed)
-            receipt.update(used_height_pt=round(g['height'], 1), rows=[r['label'] for r in g['rows']])
+        receipt = {'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1}
+        if many:
+            from pptx.dml.color import RGBColor
+            from pptx.util import Pt
+            charts = []
+            for (p, s), (lines, hbox, cbox) in zip(specs, side_by_side(specs, box)):
+                tb = slide.shapes.add_textbox(Pt(hbox[0]), Pt(hbox[1]), Pt(hbox[2]), Pt(hbox[3]))
+                tb.name = f"Claim {s['chart']}"
+                tf = tb.text_frame
+                tf.word_wrap = True
+                tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+                run = tf.paragraphs[0].add_run()
+                run.text = s['claim']
+                run.font.size = Pt(HEAD_FS)
+                run.font.bold = True
+                if dark:
+                    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                charts.append(place(slide, p, s, cbox, not a.bare, palette, dark, background))
+            receipt['charts'] = charts
         else:
-            d = render(a.spec, box[2], box[3], bare=not framed)
-            canvas = draw_svg(slide, d, box, palette, dark, background)
-            receipt.update(used_pt=[d['width'], d['height']], shapes=canvas.count)
+            receipt.update(place(slide, path, spec, box, bool(a.into) and not a.bare, palette, dark, background))
         receipt['ink'] = 'light ink for a dark slide' if dark else 'theme text colour for a light slide'
         prs.save(a.out)
         print(json.dumps(receipt))

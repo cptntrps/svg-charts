@@ -128,7 +128,7 @@ draw(); new ResizeObserver(draw).observe(el);
 needed. Pass the width of the container. `height` is the room the chart has: a chart whose height follows
 its rows (`hbarChart`, `heatmap`, `bullet`, `boxPlot`, `funnel`, `calendar`) then sizes its rows to that room.
 `strict: true` applies the slide checks (for a printed report or an image). `bare: true` leaves out the
-title, unit and source lines. On a page a label wider than its place is cut with an ellipsis and the
+title, unit and source lines. When "title · unit" is wider than the chart, the unit moves to a second line. On a page a label wider than its place is cut with an ellipsis and the
 tooltip has the full text.
 
 ## On a slide
@@ -139,6 +139,7 @@ python3 deck/chart.py spec.json --out chart.pptx                 # a new 16:9 de
 python3 deck/chart.py --list deck.pptx --slide 3                 # shapes and boxes of a slide
 python3 deck/chart.py spec.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
 python3 deck/chart.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 --out deck2.pptx
+python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim of the slide"   # two or three charts side by side
 ```
 
 `--out` alone writes one slide: the claim as the title, "title · unit" under it, the chart, the source.
@@ -160,6 +161,39 @@ sets it when the background is a picture.
 The script needs `python-pptx`, and `node` for every chart but `rankedTable` (`charts.js` computes the
 geometry). Exit 0 prints one JSON line (the chart, the box, the size used). Exit 2 means nothing is written,
 with the reason and the remedy. A slide never gets an ellipsis, smaller text or a missing label.
+
+### Two or three charts on one slide
+
+```sh
+python3 deck/chart.py a.json b.json --out slide.pptx --title "The claim of the slide"
+python3 deck/chart.py a.json b.json c.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+python3 deck/chart.py a.json b.json c.json --check --title "The claim of the slide"
+```
+
+Give two or three spec files. The script divides the box into equal columns with 24pt between them and
+writes the `claim` of each spec above its chart (13pt, 3 lines at most). `--out` alone needs `--title`: the
+claim of the whole slide. With `--into`, write that claim into the slide's own title. When one chart does
+not fit its column, nothing is written. Four or more charts are refused.
+
+1. The slide still makes one point. The charts are the two or three facts that support it. Charts that
+   answer different questions go on different slides.
+2. When the reader must compare the charts with each other, give them the same chart type, the same unit and
+   the same order of items. The script does not give charts a common axis: for an exact comparison, put the
+   series in one chart (`groupedBars`, `lineChart`).
+3. A column of three is about 270pt wide and a column of two about 420pt. A title and unit that are wider
+   than the column take two lines. Not every form fits:
+
+| Form | Two per slide | Three per slide |
+|---|---|---|
+| `hbarChart`, `bullet`, `boxPlot`, `dumbbell`, `slope`, `funnel`, `gauge`, `lineChart`, `stackedArea`, `stackedBars`, `groupedBars`, `divergingBars`, `histogram`, `scatter`, `heatmap`, `calendar`, `sankey` | yes | yes |
+| `barChart`, `waterfall` | yes | only with labels of about 5 characters, or 3 to 4 bars |
+| `donut` | yes | only with short slice names |
+| `wordCloud` | yes | only with fewer words |
+| `pareto`, `treemap` | only with fewer items or shorter labels | no |
+| `rankedTable` | only with one more column at most | no |
+
+`--check` tells for the real spec. When a form does not fit, use the form for narrow places (`hbarChart` in
+place of `barChart` and `pareto`) or give the chart its own slide.
 
 ## Before you hand over
 

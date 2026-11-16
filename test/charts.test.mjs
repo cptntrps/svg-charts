@@ -573,3 +573,20 @@ test('stackedArea: totalLabels writes the first and the last total', () => {
   assert.ok(out.includes('>$92k</text>') && out.includes('>$102k</text>'), 'the totals the claim names are in the chart');
   assert.ok(!charts.chart({ ...spec, totalLabels: false }).includes('>$92k</text>'));
 });
+
+test('frame: in a narrow chart the unit stands on its own line under the title', () => {
+  const spec = examples.find(([, s]) => s.chart === 'heatmap')[1];
+  const wide = charts.chart(spec, { width: 864 }), narrow = charts.chart(spec, { width: 272, strict: true });
+  assert.ok(wide.includes('<tspan'), 'one line when it fits');
+  assert.ok(narrow.includes(`<text x="4" y="15" font-size="14" font-weight="700" fill="var(--chart-ink,#141716)">${spec.title}</text>`), 'the title alone on line one');
+  assert.ok(new RegExp(`<text x="4" y="31" font-size="12"[^>]*>${spec.unit}</text>`).test(narrow), 'the unit on line two');
+  const firstRow = s => Math.min(...[...s.matchAll(/<rect x="[\d.]+" y="([\d.]+)"[^>]*rx="3"/g)].map(m => +m[1]));
+  assert.ok(firstRow(narrow) >= 38 + 20, 'the cells start under the two lines');
+});
+
+test('dumbbell: a narrow chart gives the label column only the width of its labels', () => {
+  const spec = examples.find(([, s]) => s.chart === 'dumbbell')[1];
+  const grid = s => [...s.matchAll(/<line x1="([\d.]+)" x2="\1" y1="[\d.]+" y2="[\d.]+" stroke="var\(--chart-grid/g)].map(m => +m[1]);
+  assert.equal(grid(charts.chart(spec, { width: 600 }))[0], 150);
+  assert.ok(grid(charts.chart(spec, { width: 272 }))[0] < 100);
+});
