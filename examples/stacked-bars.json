@@ -1,0 +1,35 @@
+{
+ "chart": "stackedBars",
+ "claim": "The top tier lost ten points of the spend mix in six months",
+ "title": "Spend mix by tier",
+ "unit": "share of the month",
+ "source": "Sample data",
+ "keys": ["Top tier", "Mid tier", "Low tier"],
+ "legend": true,
+ "columns": [
+  {
+   "label": "Jan",
+   "parts": { "Top tier": 0.5, "Mid tier": 0.3, "Low tier": 0.2 }
+  },
+  {
+   "label": "Feb",
+   "parts": { "Top tier": 0.48, "Mid tier": 0.31, "Low tier": 0.21 }
+  },
+  {
+   "label": "Mar",
+   "parts": { "Top tier": 0.46, "Mid tier": 0.33, "Low tier": 0.21 }
+  },
+  {
+   "label": "Apr",
+   "parts": { "Top tier": 0.44, "Mid tier": 0.34, "Low tier": 0.22 }
+  },
+  {
+   "label": "May",
+   "parts": { "Top tier": 0.42, "Mid tier": 0.35, "Low tier": 0.23 }
+  },
+  {
+   "label": "Jun",
+   "parts": { "Top tier": 0.4, "Mid tier": 0.36, "Low tier": 0.24 }
+  }
+ ]
+}

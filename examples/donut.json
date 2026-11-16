@@ -1,0 +1,17 @@
+{
+ "chart": "donut",
+ "claim": "Produce and meat are 59% of the grocery spend",
+ "title": "Grocery spend by category",
+ "unit": "$, last 12 months",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "centerLabel": "total",
+ "slices": [
+  { "label": "Produce", "value": 820 },
+  { "label": "Meat and fish", "value": 640 },
+  { "label": "Dairy", "value": 410 },
+  { "label": "Pantry", "value": 380 },
+  { "label": "Drinks", "value": 150 },
+  { "label": "Other", "value": 95 }
+ ]
+}

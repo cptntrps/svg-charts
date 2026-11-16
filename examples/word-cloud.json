@@ -1,0 +1,27 @@
+{
+ "chart": "wordCloud",
+ "claim": "Refund and delivery are the most frequent words in the support tickets",
+ "title": "Words in support tickets",
+ "unit": "tickets that hold the word",
+ "source": "Sample data",
+ "words": [
+  { "text": "refund", "value": 48 },
+  { "text": "delivery", "value": 41 },
+  { "text": "late", "value": 33 },
+  { "text": "invoice", "value": 30 },
+  { "text": "login", "value": 24 },
+  { "text": "password", "value": 22 },
+  { "text": "damaged", "value": 21 },
+  { "text": "tracking", "value": 18 },
+  { "text": "coupon", "value": 16 },
+  { "text": "address", "value": 14 },
+  { "text": "return", "value": 13 },
+  { "text": "payment", "value": 12 },
+  { "text": "app", "value": 11 },
+  { "text": "size", "value": 10 },
+  { "text": "colour", "value": 9 },
+  { "text": "delay", "value": 8 },
+  { "text": "gift", "value": 7 },
+  { "text": "stock", "value": 6 }
+ ]
+}

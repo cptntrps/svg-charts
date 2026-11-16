@@ -1,0 +1,26 @@
+{
+ "chart": "lineChart",
+ "claim": "Support tickets fell by a third after the March release and are below the target since May",
+ "title": "Support tickets",
+ "unit": "tickets per month",
+ "source": "Sample data",
+ "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+ "target": 300,
+ "series": [
+  {
+   "name": "Tickets",
+   "points": [
+    { "x": "Jan", "y": 420 },
+    { "x": "Feb", "y": 436 },
+    { "x": "Mar", "y": 410 },
+    { "x": "Apr", "y": 331 },
+    { "x": "May", "y": 289 },
+    { "x": "Jun", "y": 274 }
+   ]
+  }
+ ],
+ "valueLabels": true,
+ "annotations": [
+  { "index": 2, "text": "release" }
+ ]
+}

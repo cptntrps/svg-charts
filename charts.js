@@ -57,14 +57,19 @@ const axisText = (x, y, anchor, t, extra = '') => {
 // bottom band (16px) holds "Source: ...". Builders add the bands to their own
 // margins so the plot shrinks and the svg keeps the height the caller passed.
 const TOP_BAND = 22, BOTTOM_BAND = 16;
-function frame({ title, unit, source, H }) {
+function frame({ title, unit, source, H, W }) {
   const hasTop = title != null || unit != null;
+  // A line that is wider than the chart is shortened: the unit first, and the title when there is no unit.
+  const room = W != null ? W - 8 : Infinity, sep = title != null && unit != null ? ' · ' : '';
+  const long = textW((title ?? '') + sep + (unit ?? ''), 14) * 0.86 > room;
+  if (long && unit != null) unit = fit(unit, Math.max(14, room / 0.86 - textW((title ?? '') + sep, 14)), 14);
+  if (long && title != null && textW(title + sep + (unit ?? ''), 14) * 0.86 > room) title = fit(title, Math.max(14, room / 0.86 - textW(sep + (unit ?? ''), 14)), 14);
   let deco = '';
   if (hasTop) {
     const u = unit != null ? `<tspan font-weight="400" fill="${AXIS}">${title != null ? ' · ' : ''}${esc(unit)}</tspan>` : '';
     deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${title != null ? esc(title) : ''}${u}</text>`;
   }
-  if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(source)}</text>`;
+  if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(W != null ? fit(source, room / 0.86 - textW('Source: ', 10), 10) : source)}</text>`;
   const titleLine = (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '');
   return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco,
     titleBox: hasTop ? labelBox(4, 15, titleLine, 'start', 14, 0) : null };
@@ -107,7 +112,7 @@ function seriesLegend(items, colors) {
 }
 
 // Text width estimate (a string builder has no font metrics): 0.6em per character.
-const textW = (s, fs) => String(s).length * fs * 0.6;
+function textW(s, fs) { return String(s).length * fs * 0.6; }
 // Box of a text label with its baseline at (x, y). `m` is the clearance a callout
 // keeps from it: 14px for the target label, 2px for value labels.
 function labelBox(x, y, text, anchor = 'end', fs = 12, m = 14) {
@@ -205,7 +210,7 @@ function gridY(ticks, L, R, W, Y, fmt) {
 // series: [{ name, color?, dash?, points:[{x,y}] }]; labels: the ordered x categories.
 export function lineChart({ series = [], labels = [], label, width = 600, height = 280,
   target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors, valueLabels = false, area = false } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'line chart';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'line chart';
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], band = {}, W = width;
   const body = extraTop => {
@@ -223,7 +228,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
     g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
       ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
-    const avoid = [], placed = [], placedText = new Map();
+    const avoid = [], placed = [], placedText = new Map(), placedBox = new Map();
     series.forEach((s, si) => {
       const col = colorOf(s, si);
       const pts = s.points.map(p => [labels.indexOf(p.x), p.y]).filter(p => p[0] >= 0 && fin(p[1]));
@@ -236,10 +241,13 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
       for (let i = 1; i < pts.length; i++) avoid.push(segment(X(pts[i - 1][0]), Y(pts[i - 1][1]), X(pts[i][0]), Y(pts[i][1])));
       if (valueLabels) pts.forEach(p => {        // one 11px label above each point; a label that would overlap an earlier one is skipped
         const t = fmtY(p[1]), anchor = p[0] === 0 ? 'start' : p[0] === labels.length - 1 ? 'end' : 'middle';
-        const box = labelBox(X(p[0]), Y(p[1]) - 7, t, anchor, 11, 2);
+        // A label that the target line would cross, or that would touch the target label, goes under its point.
+        const onTarget = b => tIn && ((Y(target) > b.y0 - 2 && Y(target) < b.y1 + 2) || nearBox(b, labelBox(W - R, Y(target) - 5, 'target ' + fmtY(target), 'end', 12, 2)));
+        let by = Y(p[1]) - 7, box = labelBox(X(p[0]), by, t, anchor, 11, 2);
+        if (onTarget(box)) { by = Y(p[1]) + 16; box = labelBox(X(p[0]), by, t, anchor, 11, 2); if (onTarget(box)) return; }
         if (placed.some(b => nearBox(box, b))) return;
-        placed.push(box); avoid.push(box); placedText.set(si + ':' + p[0], t);
-        g += axisText(X(p[0]), Y(p[1]) - 7, anchor, t, `fill="${INK}" font-weight="700" font-size="11"`);
+        placed.push(box); avoid.push(box); placedText.set(si + ':' + p[0], t); if (by < Y(p[1])) placedBox.set(si + ':' + p[0], box);
+        g += axisText(X(p[0]), by, anchor, t, `fill="${INK}" font-weight="700" font-size="11"`);
       });
     });
     if (target != null && fin(target)) {
@@ -256,7 +264,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
       const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
       const p = s.points.find(p => p.x === x);
-      return p && [X(a.index), Y(p.y), undefined, placedText.get((a.series ?? 0) + ':' + a.index)];
+      return p && [X(a.index), Y(p.y), placedBox.get((a.series ?? 0) + ':' + a.index), placedText.get((a.series ?? 0) + ':' + a.index)];
     });
     return lg.svg + g;
   };
@@ -268,7 +276,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
 // Items may name a `series`; items of one series share a colour and `legend: true` lists the series.
 export function barChart({ data = [], label, width = 600, height = 260,
   target = null, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'bar chart';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'bar chart';
   const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
   const colorOf = (d, i) => pickColor(d.color, colors, [d.label, d.series],
     d.series != null ? groups.find(e => e.name === d.series).color : palette(i));
@@ -312,7 +320,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
 // large totals stay visible; the total bars then rise from that axis start, which the lowest tick names.
 export function waterfall({ items = [], label, width = 600, height = 290, fmtY = num,
   title, unit, source, annotations = [], legend = false, colors, zoom = false } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'waterfall';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'waterfall';
   const groups = seriesLegend(items, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
     const lg = legendRows(entries, W, f.top + extraTop);
@@ -358,7 +366,7 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
 // groups: [{ name, color?, points:[{x,y, tip?}], line?:{from,to,fn} }]
 export function scatter({ groups = [], label, width = 600, height = 330,
   xLabel = '', yLabel = '', fmtX = num, fmtY = num, title, unit, source, annotations = [], legend = false, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'scatter';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'scatter';
   const colorOf = (gr, gi) => pickColor(gr.color, colors, [gr.name], palette(gi));
   const entries = legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], band = {}, W = width;
   const body = extraTop => {
@@ -370,9 +378,11 @@ export function scatter({ groups = [], label, width = 600, height = 330,
     const yt = niceTicks(0, Math.max(...pts.map(p => p.y)) * 1.08), YM = yt[yt.length - 1] || 1;
     const X = v => L + v / XM * (W - L - R), Y = v => Tp + (1 - v / YM) * (H - Tp - B);
     let g = gridY(yt, L, R, W, Y, fmtY);
-    g += xt.map((t, i) => axisText(X(t), H - 16, i === xt.length - 1 ? 'end' : 'middle', fmtX(t))).join('');
+    // The last label ends at its tick and the others stand on theirs, so two labels need 1.5 label widths of room.
+    const xEvery = Math.max(1, Math.ceil((Math.max(...xt.map(t => textW(fmtX(t), 12))) * 0.9 * 1.5 + 6) / ((W - L - R) / Math.max(1, xt.length - 1))));
+    g += xt.map((t, i) => i % xEvery ? '' : axisText(X(t), H - 16, i === xt.length - 1 ? 'end' : 'middle', fmtX(t))).join('');
     if (xLabel) g += axisText(W - R, H - 2, 'end', xLabel);
-    if (yLabel) g += axisText(L + 4, Tp + 10, 'start', yLabel, `font-weight="600"`);
+    if (yLabel) g += axisText(L + 4, Tp - 8, 'start', yLabel, `font-weight="600"`);
     groups.forEach((gr, gi) => {
       const col = colorOf(gr, gi);
       if (gr.line && typeof gr.line.fn === 'function') {
@@ -393,7 +403,7 @@ export function scatter({ groups = [], label, width = 600, height = 330,
 // data: [{ label, value, color? }]
 export function divergingBars({ data = [], label, width = 600, height = 280, fmtY = num,
   title, unit, source, annotations = [], legend = false, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'change';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'change';
   const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
     const lg = legendRows(entries, W, f.top + extraTop);
@@ -440,7 +450,7 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
   // The body returns the whole svg: the height depends on the band row too.
   const body = extraTop => {
     const lg = legendRows(entries, W, bandTop + extraTop);
-    const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + (source != null ? BOTTOM_BAND : 0) });
+    const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + (source != null ? BOTTOM_BAND : 0) , W: width });
     const deco = f.deco + lg.svg;
     const L = 150, R = 20, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + f.bottom;
     if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
@@ -470,7 +480,7 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
 // colors: an array by key position, or an object by key name.
 export function stackedBars({ columns = [], keys = [], colors = [], label, width = 600, height = 280, fmtY = v => Math.round(v * 100) + '%',
   title, unit, source, annotations = [], legend = false } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'stacked';
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked';
   const colorOf = (k, ki) => (Array.isArray(colors) ? colors[ki] : colors[k]) || palette(ki);
   const entries = legend ? keys.map((k, ki) => ({ name: k, color: colorOf(k, ki) })) : [], band = {}, W = width;
   const body = extraTop => {
@@ -505,10 +515,10 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
 const MUTED = 'var(--chart-muted,#b8c0c4)';
 const PAPER = 'var(--chart-paper,#fff)';
 // Shorten a label to the width it has (0.6em per character), with an ellipsis.
-const fit = (s, px, fs = 12) => {
+function fit(s, px, fs = 12) {
   const t = String(s), n = Math.max(1, Math.floor(px / (fs * 0.6)));
   return t.length > n ? t.slice(0, Math.max(1, n - 1)) + '…' : t;
-};
+}
 
 // ---------- horizontal bar chart (ranked categories, long labels, narrow pages) ----------
 // data: [{ label, value, color?, series? }]. Height follows the row count. All bars share one colour unless
@@ -523,7 +533,7 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   const lg = legendRows(entries, W, bandTop);
   const Tp = bandTop + lg.height + 6, plotH = Math.max(1, data.length) * rowHeight;
   const height = Tp + plotH + 6 + (source != null ? BOTTOM_BAND : 0);
-  const f = frame({ title, unit, source, H: height });
+  const f = frame({ title, unit, source, H: height , W: width });
   const vals = data.map(d => d.value);
   if (!vals.length) return svg(W, height + 24, f.deco + lg.svg + axisText(W / 2, Tp + 18, 'middle', 'no data'), lab);
   vals.forEach((v, i) => {
@@ -558,7 +568,7 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
 // gives each slice its value and its share. Slices after the fifth take the muted colour.
 export function donut({ slices = [], label, width = 600, height = 220, fmtY = num,
   title, unit, source, colors, centerValue, centerLabel } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'donut', W = width, H = height - f.bottom;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'donut', W = width, H = height - f.bottom;
   if (!slices.length) return svg(W, height, f.deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
   slices.forEach((s, i) => { if (!fin(s.value) || s.value <= 0) throw new RangeError(`donut slice ${i} must be a number above zero`); });
   const total = slices.reduce((a, s) => a + s.value, 0);
@@ -576,12 +586,13 @@ export function donut({ slices = [], label, width = 600, height = 220, fmtY = nu
   const cv = centerValue ?? fmtY(total), inner = 2 * (r - sw) - 6;
   g += axisText(cx, cy + (centerLabel != null ? 2 : 6), 'middle', cv, `fill="${INK}" font-weight="700" font-size="${textW(cv, 17) > inner ? 12 : 17}"`);
   if (centerLabel != null) g += axisText(cx, cy + 16, 'middle', fit(centerLabel, inner, 10), `font-size="10"`);
-  const x0 = cx + r + 18, rowH = Math.min(24, avail / slices.length), y0 = cy - rowH * slices.length / 2;
+  // The list is 380px wide at most: on a wide chart the values stay near their labels.
+  const x0 = cx + r + 18, xr = Math.min(W - 4, x0 + 380), rowH = Math.min(24, avail / slices.length), y0 = cy - rowH * slices.length / 2;
   slices.forEach((s, i) => {
     const y = y0 + i * rowH + rowH / 2, right = fmtY(s.value) + ' · ' + Math.round(s.value / total * 100) + '%';
     g += `<rect x="${round2(x0)}" y="${round2(y - 5)}" width="10" height="10" rx="2" fill="${colorOf(s, i)}"/>`;
-    g += axisText(x0 + 16, y + 4, 'start', fit(s.label, W - 4 - textW(right, 12) - (x0 + 16) - 8), `fill="${INK}"`);
-    g += axisText(W - 4, y + 4, 'end', right, `font-weight="600" fill="${INK}"`);
+    g += axisText(x0 + 16, y + 4, 'start', fit(s.label, xr - textW(right, 12) - (x0 + 16) - 8), `fill="${INK}"`);
+    g += axisText(xr, y + 4, 'end', right, `font-weight="600" fill="${INK}"`);
   });
   return svg(W, height, f.deco + g, lab);
 }
@@ -596,7 +607,7 @@ export function heatmap({ rows = [], cols = [], cells = [], label, width = 600, 
   const cw = (W - L - 4) / Math.max(1, cols.length), ch = cellHeight ?? Math.max(18, Math.min(34, cw));
   const Tp = bandTop + 20, plotH = Math.max(1, rows.length) * ch, scaleY = Tp + plotH + 8;
   const height = scaleY + 14 + (source != null ? BOTTOM_BAND : 0);
-  const f = frame({ title, unit, source, H: height }), col = color || palette(0);
+  const f = frame({ title, unit, source, H: height , W: width }), col = color || palette(0);
   const at = new Map();
   cells.forEach((c, i) => {
     if (!rows.includes(c.row) || !cols.includes(c.col)) throw new RangeError(`heatmap cell ${i} names an unknown row or column`);
@@ -650,7 +661,7 @@ const nonNeg = (v, what) => { if (!fin(v) || v < 0) throw new RangeError(`${what
 // categories: [name, ...]; series: [{ name, color?, values: [number per category] }]
 export function groupedBars({ categories = [], series = [], label, width = 600, height = 260, fmtY = num,
   title, unit, source, legend = true, colors, valueLabels = true } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'grouped bars', W = width;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'grouped bars', W = width;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top);
   const L = 54, R = 14, Tp = 16 + f.top + lg.height, B = 34, H = height - f.bottom;
@@ -678,7 +689,7 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
 // labels: [x, ...]; series: [{ name, color?, values: [number per label] }], drawn bottom to top in the order given.
 export function stackedArea({ labels = [], series = [], label, width = 600, height = 280, fmtY = num,
   title, unit, source, legend = true, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'stacked area', W = width;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked area', W = width;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top);
   const L = 54, R = 16, Tp = 14 + f.top + lg.height, B = 34, H = height - f.bottom;
@@ -705,7 +716,7 @@ export function stackedArea({ labels = [], series = [], label, width = 600, heig
 // rows: [{ label, a, b, color? }]; aLabel and bLabel name the two moments. Lines are coloured by direction.
 export function slope({ rows = [], label, width = 600, height = 300, aLabel = 'Before', bLabel = 'After', fmtY = num,
   title, unit, source, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'slope', W = width, H = height - f.bottom;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'slope', W = width, H = height - f.bottom;
   const vals = rows.flatMap(r => [r.a, r.b]);
   if (!rows.length) return noData(W, height, f.deco, lab);
   vals.forEach((v, i) => { if (!fin(v)) throw new RangeError(`slope value ${i} is not a number`); });
@@ -740,7 +751,7 @@ export function slope({ rows = [], label, width = 600, height = 300, aLabel = 'B
 export function bullet({ rows = [], label, width = 600, rowHeight = 40, fmtY = num, title, unit, source, colors, overColor = null } = {}) {
   const lab = label ?? title ?? 'bullet', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
   const Tp = bandTop + 4, height = Tp + Math.max(1, rows.length) * rowHeight + 4 + (source != null ? BOTTOM_BAND : 0);
-  const f = frame({ title, unit, source, H: height });
+  const f = frame({ title, unit, source, H: height , W: width });
   if (!rows.length) return noData(W, height, f.deco, lab);
   rows.forEach((r, i) => { nonNeg(r.value, `bullet row ${i} value`); nonNeg(r.target, `bullet row ${i} target`); });
   const hi = Math.max(...rows.flatMap(r => [r.value, r.target])) * 1.08 || 1, X = v => 4 + v / hi * (W - 8);
@@ -762,7 +773,7 @@ export function bullet({ rows = [], label, width = 600, rowHeight = 40, fmtY = n
 // values: [number, ...] binned into `bins` equal bins, or bins: [{ from, to, count }]. `mark: { value, text }` draws a line.
 export function histogram({ values = null, bins = 12, label, width = 600, height = 250, fmtX = num, fmtY = num,
   title, unit, source, color, mark = null } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'histogram', W = width, H = height - f.bottom;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'histogram', W = width, H = height - f.bottom;
   let cells = Array.isArray(bins) ? bins.map(b => ({ from: b.from, to: b.to, count: b.count })) : [];
   if (Array.isArray(values)) {
     const v = values.filter(fin); if (v.length) {
@@ -796,7 +807,7 @@ export function histogram({ values = null, bins = 12, label, width = 600, height
 export function boxPlot({ groups = [], label, width = 600, rowHeight = 34, fmtY = num, title, unit, source, colors } = {}) {
   const lab = label ?? title ?? 'box plot', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
   const Tp = bandTop + 6, plotH = Math.max(1, groups.length) * rowHeight, B = 22;
-  const height = Tp + plotH + B + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height });
+  const height = Tp + plotH + B + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height , W: width });
   const q = (v, p) => { const k = (v.length - 1) * p, a = Math.floor(k), b = Math.ceil(k); return v[a] + (v[b] - v[a]) * (k - a); };
   const boxes = groups.map((gr, i) => {
     if (Array.isArray(gr.values)) {
@@ -827,16 +838,17 @@ export function boxPlot({ groups = [], label, width = 600, rowHeight = 34, fmtY 
 
 // ---------- calendar (one cell per day, weeks as columns: habits, streaks, seasons) ----------
 // days: [{ date: 'YYYY-MM-DD', value }]. Covers the first to the last date given; a day without a value is empty.
-export function calendar({ days = [], label, width = 600, fmtY = num, title, unit, source, color } = {}) {
+// `cell` is the largest size of a day cell (22px by default); the cells shrink when the weeks need more width.
+export function calendar({ days = [], label, width = 600, fmtY = num, title, unit, source, color, cell: maxCell = 22 } = {}) {
   const lab = label ?? title ?? 'calendar', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0, DAY = 86400000;
   const parse = (d, i) => { const t = Date.parse(d + 'T00:00:00Z'); if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d)) || Number.isNaN(t)) throw new RangeError(`calendar day ${i} date must be YYYY-MM-DD`); return t; };
   const at = new Map();
   days.forEach((d, i) => { const t = parse(d.date, i); if (d.value != null) { if (!fin(d.value)) throw new RangeError(`calendar day ${i} value is not a number`); at.set(t, d.value); } else if (!at.has(t)) at.set(t, null); });
-  if (![...at.values()].some(v => v != null)) return noData(W, 120 + bandTop, frame({ title, unit, source, H: 120 + bandTop }).deco, lab);
+  if (![...at.values()].some(v => v != null)) return noData(W, 120 + bandTop, frame({ title, unit, source, H: 120 + bandTop , W: width }).deco, lab);
   const first = Math.min(...at.keys()), last = Math.max(...at.keys()), dow = t => (new Date(t).getUTCDay() + 6) % 7;   // Monday = 0
   const start = first - dow(first) * DAY, weeks = Math.floor((last - start) / DAY / 7) + 1;
-  const L = 22, cell = Math.min(22, (W - L - 2) / weeks), Tp = bandTop + 18, gridH = cell * 7, scaleY = Tp + gridH + 8;
-  const height = scaleY + 14 + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height }), col = color || palette(0);
+  const L = 22, cell = Math.min(maxCell, (W - L - 2) / weeks), Tp = bandTop + 18, gridH = cell * 7, scaleY = Tp + gridH + 8;
+  const height = scaleY + 14 + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height , W: width }), col = color || palette(0);
   const vals = [...at.values()].filter(v => v != null), lo = Math.min(0, ...vals), hi = Math.max(...vals), op = v => hi === lo ? 1 : 0.14 + 0.86 * (v - lo) / (hi - lo);
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   let g = ['M', '', 'W', '', 'F', '', ''].map((n, r) => n ? axisText(L - 6, Tp + (r + 0.5) * cell + 3.5, 'end', n, `font-size="10"`) : '').join(''), lastLabelX = -99;
@@ -857,7 +869,7 @@ export function calendar({ days = [], label, width = 600, fmtY = num, title, uni
 // ---------- treemap (many parts of one total, area = value) ----------
 // items: [{ label, value, color? }], values above zero. Squarified; a tile shows its name and value when they fit.
 export function treemap({ items = [], label, width = 600, height = 260, fmtY = num, title, unit, source, colors, color } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'treemap', W = width, H = height - f.bottom, Tp = f.top + 2;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'treemap', W = width, H = height - f.bottom, Tp = f.top + 2;
   if (!items.length) return noData(W, height, f.deco, lab);
   items.forEach((it, i) => { if (!fin(it.value) || it.value <= 0) throw new RangeError(`treemap item ${i} must be a number above zero`); });
   const total = items.reduce((a, it) => a + it.value, 0), area = W * (H - Tp);
@@ -887,7 +899,7 @@ export function treemap({ items = [], label, width = 600, height = 260, fmtY = n
 // stages: [{ label, value }] in order. Each row shows its value and its share of the first stage.
 export function funnel({ stages = [], label, width = 600, rowHeight = 44, fmtY = num, title, unit, source, color } = {}) {
   const lab = label ?? title ?? 'funnel', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
-  const Tp = bandTop + 4, height = Tp + Math.max(1, stages.length) * rowHeight + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height });
+  const Tp = bandTop + 4, height = Tp + Math.max(1, stages.length) * rowHeight + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height , W: width });
   if (!stages.length) return noData(W, height, f.deco, lab);
   stages.forEach((st, i) => nonNeg(st.value, `funnel stage ${i}`));
   const top = Math.max(...stages.map(st => st.value)) || 1, col = color || palette(0), maxW = W - 8;
@@ -905,7 +917,7 @@ export function funnel({ stages = [], label, width = 600, rowHeight = 44, fmtY =
 // ---------- sankey, two columns (where an amount comes from and where it goes) ----------
 // flows: [{ from, to, value }]. Sources stand on the left, targets on the right; a band's thickness is its value.
 export function sankey({ flows = [], label, width = 600, height = 300, fmtY = num, title, unit, source, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'sankey', W = width, H = height - f.bottom, Tp = f.top + 6;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'sankey', W = width, H = height - f.bottom, Tp = f.top + 6;
   if (!flows.length) return noData(W, height, f.deco, lab);
   flows.forEach((fl, i) => { if (!fin(fl.value) || fl.value <= 0) throw new RangeError(`sankey flow ${i} must be a number above zero`); });
   const sum = (list, key) => { const m = new Map(); list.forEach(fl => m.set(fl[key], (m.get(fl[key]) || 0) + fl.value)); return [...m].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value); };
@@ -932,7 +944,7 @@ export function sankey({ flows = [], label, width = 600, height = 300, fmtY = nu
 // ---------- gauge (one value on its way to a limit or a goal) ----------
 // value, max, optional target (a tick on the arc) and caption (under the number).
 export function gauge({ value, max, target = null, caption = null, label, width = 300, height = 190, fmtY = num, title, unit, source, color } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'gauge', W = width, H = height - f.bottom;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'gauge', W = width, H = height - f.bottom;
   if (!fin(value) || !fin(max)) return noData(W, height, f.deco, lab);
   if (max <= 0 || value < 0) throw new RangeError('gauge needs value of zero or more and max above zero');
   const sw = 16, r = Math.min((W - 24) / 2, H - f.top - 34) - sw / 2, cx = W / 2, cy = f.top + 12 + r + sw / 2;
@@ -952,7 +964,7 @@ export function gauge({ value, max, target = null, caption = null, label, width 
 // ---------- pareto (ranked bars with the running share: which few items make most of the total) ----------
 // data: [{ label, value }]; sorted here from the largest. The line is the cumulative share; a rule marks 80%.
 export function pareto({ data = [], label, width = 600, height = 270, fmtY = num, title, unit, source, color } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'pareto', W = width, H = height - f.bottom;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'pareto', W = width, H = height - f.bottom;
   if (!data.length) return noData(W, height, f.deco, lab);
   data.forEach((d, i) => nonNeg(d.value, `pareto value ${i}`));
   const rows = [...data].sort((a, b) => b.value - a.value), total = rows.reduce((a, d) => a + d.value, 0) || 1;
@@ -977,7 +989,7 @@ export function pareto({ data = [], label, width = 600, height = 270, fmtY = num
 // out and counted in the svg's data-omitted attribute, never drawn over another. Horizontal text only: it reads.
 export function wordCloud({ words = [], label, width = 600, height = 300, minSize = 12, maxSize = 40, fmtY = num,
   title, unit, source, colors } = {}) {
-  const f = frame({ title, unit, source, H: height }), lab = label ?? title ?? 'word cloud', W = width, H = height - f.bottom, Tp = f.top + 2;
+  const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'word cloud', W = width, H = height - f.bottom, Tp = f.top + 2;
   if (!words.length) return noData(W, height, f.deco, lab);
   words.forEach((w, i) => { if (!fin(w.value) || w.value <= 0 || !String(w.text ?? '').trim()) throw new RangeError(`wordCloud word ${i} needs a text and a value above zero`); });
   const sorted = [...words].sort((a, b) => b.value - a.value), hi = sorted[0].value, lo = sorted[sorted.length - 1].value;
@@ -1058,7 +1070,7 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
   const bandTop = title != null || unit != null ? TOP_BAND : 0, T = bandTop + 26;
   const notes = list.filter(r => r.flag).flatMap(r => wrapText(`* ${r.label}: ${r.flag}`, W - 8, 11));
   const height = T + Math.max(1, list.length) * rh + 8 + (notes.length ? notes.length * 15 + 4 : 0) + (source != null ? BOTTOM_BAND : 0);
-  const f = frame({ title, unit, source, H: height });
+  const f = frame({ title, unit, source, H: height , W: width });
   if (!rows.length) return svg(W, height, f.deco + axisText(W / 2, T + 18, 'middle', 'no data'), lab);
   const vmax = Math.max(...list.map(r => r.value ?? 0)) || 1, X = v => x0 + Math.max(1, x1 - x0) * v / vmax;
   let g = heads.map((h, j) => axisText(edge[j], T - 12, 'end', h, 'font-size="11"')).join('') +
@@ -1089,6 +1101,148 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
   return svg(W, height, f.deco + g + refs + hits, lab);
 }
 
+// =====================================================================================
+// One spec for every chart: chart(spec) draws a plain JSON spec, so that a page and the deck renderer
+// (deck/chart.py) use one file. The spec is the builder's options plus:
+//   chart: the builder name; claim: the finding as one sentence (page heading and slide title, not drawn here);
+//   format / formatX: { decimals, prefix, suffix }, the JSON form of fmtY / fmtX.
+// scatter: a group's line is { from, to, slope, intercept } or { fit: 'linear' } (least squares through its points).
+// chart(spec, { width, height, strict, bare }): width and height replace those of the spec. For a chart whose height
+// follows its rows, `height` is the room it has: the rows grow or shrink to use it, inside the limits of the type.
+// strict (a slide, a printed report): nothing may be cut or left out; an empty chart, a shortened label, labels that
+// overlap or a word without room throw a RangeError that names the remedy. bare leaves out title, unit and source.
+// =====================================================================================
+const COMMON = ['chart', 'claim', 'title', 'unit', 'source', 'label', 'width', 'height', 'format', 'formatX'];
+const rowsFit = (opt, min, max) => ({ opt, min, max });
+export const chartTypes = {
+  lineChart: { fn: lineChart, keys: ['series', 'labels', 'target', 'annotations', 'legend', 'colors', 'valueLabels', 'area'], height: true },
+  barChart: { fn: barChart, keys: ['data', 'target', 'annotations', 'legend', 'colors'], height: true },
+  waterfall: { fn: waterfall, keys: ['items', 'annotations', 'legend', 'colors', 'zoom'], height: true },
+  scatter: { fn: scatter, keys: ['groups', 'xLabel', 'yLabel', 'annotations', 'legend', 'colors'], height: true, fmtX: true },
+  divergingBars: { fn: divergingBars, keys: ['data', 'annotations', 'legend', 'colors'], height: true },
+  dumbbell: { fn: dumbbell, keys: ['rows', 'aLabel', 'bLabel', 'annotations', 'legend', 'colors'] },
+  stackedBars: { fn: stackedBars, keys: ['columns', 'keys', 'colors', 'annotations', 'legend'], height: true, noFormat: 'stackedBars shows each part as a percentage of its column' },
+  hbarChart: { fn: hbarChart, keys: ['data', 'rowHeight', 'legend', 'colors', 'highlight', 'diverging'], rows: rowsFit('rowHeight', 20, 40) },
+  donut: { fn: donut, keys: ['slices', 'colors', 'centerValue', 'centerLabel'], height: true },
+  heatmap: { fn: heatmap, keys: ['rows', 'cols', 'cells', 'cellHeight', 'color', 'cellLabels'], rows: rowsFit('cellHeight', 18, 44) },
+  sparkline: { fn: sparkline, keys: ['values', 'color'], height: true, noFrame: true },
+  groupedBars: { fn: groupedBars, keys: ['categories', 'series', 'legend', 'colors', 'valueLabels'], height: true },
+  stackedArea: { fn: stackedArea, keys: ['labels', 'series', 'legend', 'colors'], height: true },
+  slope: { fn: slope, keys: ['rows', 'aLabel', 'bLabel', 'colors'], height: true },
+  bullet: { fn: bullet, keys: ['rows', 'rowHeight', 'colors', 'overColor'], rows: rowsFit('rowHeight', 34, 56) },
+  histogram: { fn: histogram, keys: ['values', 'bins', 'color', 'mark'], height: true, fmtX: true },
+  boxPlot: { fn: boxPlot, keys: ['groups', 'rowHeight', 'colors'], rows: rowsFit('rowHeight', 26, 48) },
+  calendar: { fn: calendar, keys: ['days', 'color', 'cell'], rows: rowsFit('cell', 8, 40) },
+  treemap: { fn: treemap, keys: ['items', 'colors', 'color'], height: true },
+  funnel: { fn: funnel, keys: ['stages', 'rowHeight', 'color'], rows: rowsFit('rowHeight', 36, 60) },
+  sankey: { fn: sankey, keys: ['flows', 'colors'], height: true },
+  gauge: { fn: gauge, keys: ['value', 'max', 'target', 'caption', 'color'], height: true },
+  pareto: { fn: pareto, keys: ['data', 'color'], height: true },
+  wordCloud: { fn: wordCloud, keys: ['words', 'minSize', 'maxSize', 'colors'], height: true },
+  rankedTable: { fn: rankedTable, keys: ['rows', 'columns', 'valueLabel', 'total', 'change', 'sort', 'highlight', 'rowHeight', 'colors'], ownFormat: true },
+};
+const formatter = f => v => !fin(v) ? 'n/a' : (v < 0 ? '−' : '') + (f.prefix ?? '') +
+  Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: f.decimals ?? 0, maximumFractionDigits: f.decimals ?? 0 }) + (f.suffix ?? '');
+// Items that are told apart by colour only: past five the palette starts again, and two items share a colour.
+const coloured = (list, name, colors) => list.filter(it => !(it.color || (colors && !Array.isArray(colors) && colors[it[name]]))).length;
+const LIMITS = {
+  donut: s => (s.slices || []).length > 6 && 'a donut holds 6 slices at most: join the small ones as "Other", or use hbarChart',
+  groupedBars: s => (s.series || []).length > 4 && 'groupedBars holds 4 series at most: use lineChart, or one chart per series',
+  lineChart: s => coloured(s.series || [], 'name', s.colors) > 5 && 'more than 5 series share the 5 palette colours: give each a colour in `colors`, or split the chart',
+  stackedArea: s => coloured(s.series || [], 'name', s.colors) > 5 && 'more than 5 series share the 5 palette colours: join the small ones as "Other"',
+  scatter: s => coloured(s.groups || [], 'name', s.colors) > 5 && 'more than 5 groups share the 5 palette colours: give each a colour in `colors`, or split the chart',
+  stackedBars: s => (s.keys || []).length > 5 && !(Array.isArray(s.colors) ? s.colors.length >= s.keys.length : s.keys.every(k => s.colors?.[k])) &&
+    'more than 5 keys share the 5 palette colours: join the small ones as "Other"',
+  waterfall: s => {
+    let run = 0, bad = null;
+    (s.items || []).forEach((it, i) => {
+      if (it.total && i > 0 && Math.abs(it.value - run) > Math.max(1e-9, Math.abs(it.value) * 0.005)) bad ??= `the steps before "${it.label}" reach ${+run.toFixed(6)} and the total says ${it.value}: correct the steps or add the missing step`;
+      run = it.total ? it.value : run + it.value;
+    });
+    return bad;
+  },
+  funnel: s => { const st = s.stages || [], i = st.findIndex((x, k) => k > 0 && x.value > st[k - 1].value); return i > 0 && `stage "${st[i].label}" is larger than the stage before it: a funnel only loses. Use hbarChart for amounts that do not follow from each other`; },
+  sankey: s => new Set((s.flows || []).map(f => f.from)).size - Object.keys(s.colors || {}).length > 5 && 'more than 5 sources share the 5 palette colours: join the small ones as "Other"',
+};
+// Labels under vertical bars stand side by side: [labels, font size, share of the plot one label has].
+const SLOTS = {
+  barChart: s => [(s.data || []).map(d => d.label), 12, 54 + 14],
+  divergingBars: s => [(s.data || []).map(d => d.label), 11, 54 + 14],
+  waterfall: s => [(s.items || []).flatMap(d => { const w = String(d.label).split(' '); return [w[0], w.slice(1).join(' ')]; }), 0, 54 + 10],
+};
+const svgHeight = out => +out.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
+
+export function chart(spec, { width, height, strict = false, bare = false } = {}) {
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new RangeError('the spec must be an object');
+  const type = chartTypes[spec.chart];
+  if (!type) throw new RangeError(`"chart" must be one of: ${Object.keys(chartTypes).join(', ')}`);
+  const what = spec.chart;
+  const unknown = Object.keys(spec).filter(k => !COMMON.includes(k) && !type.keys.includes(k));
+  if (unknown.length) throw new RangeError(`${what} does not take "${unknown.join('", "')}". It takes: ${type.keys.join(', ')}, and ${COMMON.join(', ')}`);
+  if (spec.format && type.noFormat) throw new RangeError(`${type.noFormat}: remove "format"`);
+  if (spec.formatX && !type.fmtX) throw new RangeError(`${what} has one value axis: remove "formatX"`);
+  const limit = LIMITS[what]?.(spec);
+  if (limit) throw new RangeError(`${what}: ${limit}`);
+  const o = {};
+  type.keys.forEach(k => { if (spec[k] !== undefined) o[k] = spec[k]; });
+  if (!bare && !type.noFrame) ['title', 'unit', 'source'].forEach(k => { if (spec[k] != null) o[k] = spec[k]; });
+  o.label = spec.label ?? spec.claim ?? spec.title;
+  if (type.ownFormat) { if (spec.format) o.format = spec.format; }
+  else if (spec.format) o.fmtY = formatter(spec.format);
+  if (spec.formatX) o.fmtX = formatter(spec.formatX);
+  if (what === 'scatter') o.groups = (spec.groups || []).map((g, gi) => {
+    if (!g.line) return g;
+    let { from, to, slope: m, intercept: b } = g.line;
+    const pts = g.points || [];
+    if (g.line.fit === 'linear') {
+      if (pts.length < 3) throw new RangeError(`scatter group ${gi}: a fitted line needs 3 points or more`);
+      const n = pts.length, mx = pts.reduce((a, p) => a + p.x, 0) / n, my = pts.reduce((a, p) => a + p.y, 0) / n;
+      const sxx = pts.reduce((a, p) => a + (p.x - mx) ** 2, 0);
+      if (!sxx) throw new RangeError(`scatter group ${gi}: a fitted line needs points with different x`);
+      m = pts.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / sxx; b = my - m * mx;
+      from ??= Math.min(...pts.map(p => p.x)); to ??= Math.max(...pts.map(p => p.x));
+    }
+    if (![from, to, m, b].every(fin)) throw new RangeError(`scatter group ${gi}: line needs from, to, slope and intercept, or fit: "linear"`);
+    return { ...g, line: { from, to, fn: x => b + m * x } };
+  });
+  const W = width ?? spec.width, H = height ?? spec.height;
+  if (W != null) o.width = W;
+  if (type.height && H != null) o.height = H;
+  let out;
+  if (type.rows && H != null && spec[type.rows.opt] == null) {
+    // Height follows the rows: measure two row sizes, then take the largest row size that fits the room.
+    const { opt, min, max } = type.rows, at = v => svgHeight(type.fn({ ...o, [opt]: v }));
+    const n = (at(max) - at(min)) / (max - min), fixed = at(min) - n * min;
+    const best = n > 0 ? Math.min(max, Math.floor((H - fixed) / n)) : max;
+    if (best < min) throw new RangeError(`${what}: ${n} rows need ${Math.ceil(fixed + n * min)}px of height and have ${H}px: use fewer rows or a taller box`);
+    let size = best;
+    out = type.fn({ ...o, [opt]: size });
+    while (svgHeight(out) > H + 0.5 && size > min) out = type.fn({ ...o, [opt]: --size });
+  } else out = type.fn(o);
+  if (type.rows && H != null && svgHeight(out) > H + 0.5) throw new RangeError(`${what} needs ${Math.ceil(svgHeight(out))}px of height and has ${H}px: use fewer rows or a taller box`);
+  if (!type.height && H != null && svgHeight(out) > H + 0.5) throw new RangeError(`${what} needs ${Math.ceil(svgHeight(out))}px of height and has ${H}px: use fewer rows or a taller box`);
+  if (strict) {
+    const texts = [...out.matchAll(/<text\b[^>]*>(.*?)<\/text>/g)].map(m => m[1].replace(/<title>.*?<\/title>/g, '').replace(/<[^>]+>/g, ''));
+    if (texts.includes('no data')) throw new RangeError(`${what}: the spec has no data to draw`);
+    const said = JSON.stringify(spec), cut = texts.find(t => /…/.test(t) && !said.includes(t.replace(/&amp;/g, '&')));
+    if (cut) throw new RangeError(`${what}: the label "${cut}" is cut: shorten it, use fewer items or give the chart more width`);
+    const omitted = +(out.match(/data-omitted="(\d+)"/)?.[1] ?? 0);
+    if (omitted) throw new RangeError(`${what}: ${omitted} words have no room: remove the smallest words, lower maxSize or give the chart a larger box`);
+    // A slide has no tooltip: a tile or a node without its name is a number nobody can read.
+    const names = what === 'treemap' ? (spec.items || []).map(it => it.label) : what === 'sankey' ? [...new Set((spec.flows || []).flatMap(f => [f.from, f.to]))] : [];
+    const hidden = names.find(n => !texts.some(t => t === esc(n) || t.startsWith(esc(n) + ' ')));
+    if (hidden != null) throw new RangeError(`${what}: "${hidden}" is too small to show its name: join the smallest items as "Other" or give the chart a larger box`);
+    const slot = SLOTS[what]?.(spec);
+    if (slot && slot[0].length) {
+      const n = what === 'waterfall' ? slot[0].length / 2 : slot[0].length, bw = ((o.width ?? 600) - slot[2]) / n;
+      const fs = slot[1] || (bw < 90 ? 11 : 13), long = slot[0].reduce((a, t) => String(t).length > String(a).length ? t : a, '');
+      if (textW(long, fs) * 0.88 > bw) throw new RangeError(`${what}: the label "${long}" is wider than its bar slot (${Math.floor(bw)}px): shorten the labels, use fewer bars, or use hbarChart for long labels`);
+    }
+  }
+  return out;
+}
+
+
 export default { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, hbarChart, donut, heatmap, sparkline,
   groupedBars, stackedArea, slope, bullet, histogram, boxPlot, calendar, treemap, funnel, sankey, gauge, pareto, wordCloud, rankedTable,
-  niceTicks, svg, esc, fin, palette };
+  chart, chartTypes, niceTicks, svg, esc, fin, palette };

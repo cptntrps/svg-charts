@@ -1,0 +1,16 @@
+{
+ "chart": "treemap",
+ "claim": "Rent is 64% of the monthly spend",
+ "title": "Monthly spend by category",
+ "unit": "$",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "items": [
+  { "label": "Rent", "value": 584 },
+  { "label": "Groceries", "value": 95 },
+  { "label": "Dining", "value": 87 },
+  { "label": "Medical", "value": 58 },
+  { "label": "Shopping", "value": 36 },
+  { "label": "Other", "value": 54 }
+ ]
+}

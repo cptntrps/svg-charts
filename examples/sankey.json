@@ -1,0 +1,16 @@
+{
+ "chart": "sankey",
+ "claim": "Food takes 79% of the spend, and Store A supplies most of it",
+ "title": "Spend by store and category",
+ "unit": "$",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "flows": [
+  { "from": "Store A", "to": "Food", "value": 300 },
+  { "from": "Store A", "to": "Household", "value": 65 },
+  { "from": "Store B", "to": "Food", "value": 48 },
+  { "from": "Store B", "to": "Household", "value": 16 },
+  { "from": "Other", "to": "Food", "value": 60 },
+  { "from": "Other", "to": "Pharmacy", "value": 25 }
+ ]
+}

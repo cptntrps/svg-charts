@@ -1,0 +1,16 @@
+{
+ "chart": "dumbbell",
+ "claim": "Each line cut its cost per order in the quarter; Line one cut the most",
+ "title": "Cost per order",
+ "unit": "$, April and June",
+ "source": "Sample data",
+ "aLabel": "April",
+ "bLabel": "June",
+ "legend": true,
+ "format": { "decimals": 0, "prefix": "$" },
+ "rows": [
+  { "label": "Line one", "a": 58, "b": 41 },
+  { "label": "Line two", "a": 47, "b": 44 },
+  { "label": "Line three", "a": 52, "b": 43 }
+ ]
+}

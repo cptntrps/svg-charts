@@ -1,0 +1,12 @@
+{
+ "chart": "gauge",
+ "claim": "The team used 72% of the month budget, below the 80% line",
+ "title": "Budget used",
+ "unit": "$ thousand",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$", "suffix": "k" },
+ "value": 720,
+ "max": 1000,
+ "target": 800,
+ "caption": "of the month budget"
+}

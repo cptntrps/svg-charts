@@ -1,0 +1,19 @@
+{
+ "chart": "boxPlot",
+ "claim": "The South hub is the slowest and the least regular: its median is 4 days and its range is 2 to 9",
+ "title": "Delivery time by hub",
+ "unit": "days",
+ "source": "Sample data",
+ "format": { "decimals": 0, "suffix": " d" },
+ "groups": [
+  {
+   "label": "North hub",
+   "values": [1, 2, 2, 2, 3, 3, 3, 4, 4, 6]
+  },
+  { "label": "South hub", "min": 2, "q1": 3, "median": 4, "q3": 6, "max": 9 },
+  {
+   "label": "West hub",
+   "values": [1, 1, 2, 2, 2, 2, 3, 3, 3, 4]
+  }
+ ]
+}

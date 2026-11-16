@@ -1,0 +1,19 @@
+{
+ "chart": "groupedBars",
+ "claim": "This year is above last year in three of four quarters",
+ "title": "Spend by quarter",
+ "unit": "$ thousand",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$", "suffix": "k" },
+ "categories": ["Q1", "Q2", "Q3", "Q4"],
+ "series": [
+  {
+   "name": "Last year",
+   "values": [210, 240, 232, 260]
+  },
+  {
+   "name": "This year",
+   "values": [228, 251, 270, 248]
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "chart": "histogram",
+ "claim": "Most baskets hold 40 to 80 items; one basket in ten holds more than 100",
+ "title": "Basket size",
+ "unit": "baskets per size range",
+ "source": "Sample data",
+ "bins": 8,
+ "values": [22, 35, 41, 44, 48, 52, 55, 57, 61, 63, 64, 68, 72, 75, 79, 84, 91, 98, 120, 164],
+ "mark": { "value": 63.5, "text": "median 63.5" }
+}

@@ -1,0 +1,17 @@
+{
+ "chart": "pareto",
+ "claim": "Three of seven items make 58% of the spend; five make 84%",
+ "title": "Spend by item",
+ "unit": "$",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "data": [
+  { "label": "Coffee", "value": 200 },
+  { "label": "Milk", "value": 177 },
+  { "label": "Beef", "value": 130 },
+  { "label": "Protein", "value": 125 },
+  { "label": "Soda", "value": 94 },
+  { "label": "Fish", "value": 81 },
+  { "label": "Rest", "value": 60 }
+ ]
+}

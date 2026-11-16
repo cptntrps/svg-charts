@@ -1,0 +1,13 @@
+{
+ "chart": "funnel",
+ "claim": "Two of three applications stop before the screen",
+ "title": "Hiring funnel",
+ "unit": "candidates",
+ "source": "Sample data",
+ "stages": [
+  { "label": "Applied", "value": 120 },
+  { "label": "Screened", "value": 42 },
+  { "label": "Interviewed", "value": 15 },
+  { "label": "Offer", "value": 3 }
+ ]
+}
