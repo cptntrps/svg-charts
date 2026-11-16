@@ -142,7 +142,7 @@ python3 deck/chart.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 
 python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim of the slide"   # two or three charts side by side
 ```
 
-`--out` alone writes one slide: the claim as the title, "title · unit" under it, the chart, the source.
+`--out` alone writes one slide: the claim as the title, "title · unit" under it as the subtitle, the chart, the source.
 `--into` draws into a slide of an existing deck: write the claim into the slide's own title. `--replace`
 gives the chart the box of a named shape and removes that shape; `--box` is x, y, width and height in
 points. The chart keeps its "title · unit" line and its source line; `--bare` leaves them out when the
@@ -161,6 +161,31 @@ sets it when the background is a picture.
 The script needs `python-pptx`, and `node` for every chart but `rankedTable` (`charts.js` computes the
 geometry). Exit 0 prints one JSON line (the chart, the box, the size used). Exit 2 means nothing is written,
 with the reason and the remedy. A slide never gets an ellipsis, smaller text or a missing label.
+
+### Title, subtitle and takeaway
+
+A slide has three lines of text around its charts, and each has one job:
+
+| Line | Job | Example |
+|---|---|---|
+| Title | the claim: the finding as one sentence | "Support tickets fell by a third after the March release" |
+| Subtitle | what the numbers are: the measure, the unit, the period, the scope. It is not a comment on the chart | "Number of support tickets per month, all regions, 2026" |
+| Takeaway | the comment: what the reader must conclude or do. It does not say the claim again | "Move the support budget of the third quarter to the release team" |
+
+```sh
+python3 deck/chart.py spec.json --out slide.pptx --subtitle "Number of support tickets per month, all regions, 2026" --takeaway "Move the support budget to the release team"
+```
+
+- For one chart the subtitle is the "title · unit" of the spec when you give none. `--subtitle` takes its
+  place, so it must still name the measure and the unit. On a slide with two or three charts, `--subtitle`
+  names what they share (the company, the period, the currency) and each chart keeps its own "title · unit".
+- `--takeaway` writes one or two bold lines with an accent bar under the charts. Use it when the slide asks
+  for a decision. Leave it out when it would only say the title again.
+- Both take two lines at most, and both take their room from the chart: `--check` with the same options
+  tells if the chart still fits.
+- With `--into`, the subtitle stands at the top of the box and the takeaway at its bottom, in the font of
+  the template. When the template has its own places for them, write them there and do not give the options.
+- `--out` keeps 22pt between the title block and the chart.
 
 ### Two or three charts on one slide
 

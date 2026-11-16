@@ -37,6 +37,10 @@ def group(slide):
     return groups[0]
 
 
+def title_block(slide):
+    return [p.text for p in next(s for s in slide.shapes if s.name == 'Title').text_frame.paragraphs]
+
+
 def texts(shapes):
     return [s.text_frame.text for s in shapes if s.has_text_frame and s.text_frame.text]
 
@@ -83,10 +87,10 @@ class ChartDeck(unittest.TestCase):
                 self.assertGreaterEqual(g.top, box[1] * PT - 6 * PT)       # a text box stands a little above its baseline row
                 self.assertLessEqual(g.left + g.width, (box[0] + box[2]) * PT + PT)
                 self.assertLessEqual(g.top + g.height, (box[1] + box[3]) * PT + 6 * PT)
-                self.assertEqual(texts(slide.shapes)[0], spec['claim'], 'the slide title is the claim')
+                self.assertEqual(title_block(slide)[0], spec['claim'], 'the slide title is the claim')
                 if spec['chart'] == 'rankedTable':
                     continue
-                page = ch.render(str(path), box[2], box[3], bare=True)['svg']
+                page = ch.render(str(path), box[2], box[3], 'none')['svg']
                 want = [html.unescape(re.sub(r'<title>.*?</title>|<[^>]+>', '', m)) for m in re.findall(r'<text\b[^>]*>(.*?)</text>', page)]
                 have = texts(g.shapes)
                 self.assertEqual(sorted(t for t in want if t.strip()), sorted(have), 'the slide shows the texts of the page chart')
@@ -180,7 +184,7 @@ class ChartDeck(unittest.TestCase):
         code, receipt, err = run(ex / 'line-chart.json', ex / 'hbar-chart.json', '--out', out, '--title', 'Two findings on one slide')
         self.assertEqual(code, 0, err)
         slide = Presentation(out).slides[0]
-        self.assertEqual(texts(slide.shapes)[0], 'Two findings on one slide')
+        self.assertEqual(title_block(slide), ['Two findings on one slide'])
         groups = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.GROUP]
         claims = [s for s in slide.shapes if s.name.startswith('Claim ')]
         self.assertEqual([g.name for g in groups], ['Chart lineChart', 'Chart hbarChart'])
@@ -222,6 +226,65 @@ class ChartDeck(unittest.TestCase):
         code, receipt, _ = run(ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', '--check', '--title', 'x')
         self.assertEqual(code, 0)
         self.assertEqual([c['chart'] for c in json.loads(receipt)['charts']], ['gauge', 'funnel', 'slope'])
+
+    def test_subtitle_and_takeaway_take_their_room_from_the_chart(self):
+        ex = ROOT / 'examples'
+        sub, take = 'Support tickets per month, all regions, 2026', 'Move the support budget to the release team.'
+        plain, both = self.dir / 'plain.pptx', self.dir / 'both.pptx'
+        _, r0, _ = run(ex / 'line-chart.json', '--out', plain)
+        code, r1, err = run(ex / 'line-chart.json', '--out', both, '--subtitle', sub, '--takeaway', take)
+        self.assertEqual(code, 0, err)
+        b0, b1 = json.loads(r0)['box_pt'], json.loads(r1)['box_pt']
+        self.assertEqual(b1[1], b0[1], 'a subtitle of one line takes the place of the default one: the chart stays')
+        self.assertLess(b1[1] + b1[3], b0[1] + b0[3], 'the takeaway takes room under the chart')
+        slide = Presentation(both).slides[0]
+        self.assertEqual(title_block(slide), [json.loads((ex / 'line-chart.json').read_text(encoding='utf-8'))['claim'], sub],
+                         'the subtitle given takes the place of "title · unit" under the claim')
+        self.assertEqual(title_block(Presentation(plain).slides[0])[1], 'Support tickets · tickets per month', 'the default subtitle says what the numbers are')
+        g = group(slide)
+        takeaway = next(s for s in slide.shapes if s.name == 'Takeaway')
+        bar = next(s for s in slide.shapes if s.name == 'Takeaway bar')
+        self.assertEqual(takeaway.text_frame.text, take)
+        self.assertTrue(takeaway.text_frame.paragraphs[0].runs[0].font.bold)
+        self.assertGreaterEqual(takeaway.top, g.top + g.height, 'the takeaway stands under the chart')
+        self.assertLessEqual(takeaway.top + takeaway.height, 486 * PT + PT)
+        self.assertEqual(bar.top, takeaway.top)
+
+        deck, out = self.base_deck(dark=True), self.dir / 'into.pptx'
+        code, _, err = run(ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', '--into', deck, '--replace', 'Chart area',
+                           '--subtitle', sub, '--takeaway', take, '--out', out)
+        self.assertEqual(code, 0, err)
+        slide = Presentation(out).slides[0]
+        subtitle = next(s for s in slide.shapes if s.name == 'Subtitle')
+        claims = [s for s in slide.shapes if s.name.startswith('Claim ')]
+        takeaway = next(s for s in slide.shapes if s.name == 'Takeaway')
+        self.assertEqual(subtitle.top, 120 * PT, 'in an existing slide the subtitle stands at the top of the box')
+        self.assertGreaterEqual(min(c.top for c in claims) - (subtitle.top + subtitle.height), 20 * PT, 'room between the subtitle and the claims')
+        self.assertEqual(takeaway.top + takeaway.height, 480 * PT)
+        self.assertEqual(str(takeaway.text_frame.paragraphs[0].runs[0].font.color.rgb), 'FFFFFF')
+        for g in (s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.GROUP):
+            self.assertLessEqual(g.top + g.height, takeaway.top + 6 * PT)
+
+        one = self.dir / 'one.pptx'
+        self.assertEqual(run(ex / 'line-chart.json', '--into', deck, '--replace', 'Chart area', '--subtitle', sub, '--out', one)[0], 0)
+        slide = Presentation(one).slides[0]
+        have = texts(group(slide).shapes)
+        self.assertNotIn('Support tickets · tickets per month', have, 'the subtitle takes the place of the title line of the chart')
+        self.assertIn('Source: Sample data', have, 'the chart keeps its source')
+
+        long = 'A takeaway that goes on and on ' * 12
+        code, _, err = run(ex / 'line-chart.json', '--out', self.dir / 'x.pptx', '--takeaway', long)
+        self.assertEqual(code, 2)
+        self.assertIn('the takeaway needs', err)
+
+    def test_the_title_keeps_its_distance_from_the_chart(self):
+        out = self.dir / 'three.pptx'
+        ex = ROOT / 'examples'
+        self.assertEqual(run(ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', '--out', out, '--title', 'One line')[0], 0)
+        slide = Presentation(out).slides[0]
+        title = next(s for s in slide.shapes if s.name == 'Title')
+        claims = [s for s in slide.shapes if s.name.startswith('Claim ')]
+        self.assertGreaterEqual(min(c.top for c in claims) - (title.top + title.height), 22 * PT - 1)
 
     def test_check_reports_the_fit_without_a_deck(self):
         code, receipt, _ = run(ROOT / 'examples' / 'heatmap.json', '--check')

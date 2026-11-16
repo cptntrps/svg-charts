@@ -59,15 +59,14 @@ class RankedTableDeck(unittest.TestCase):
         for needed in ('2.40%', '▼ −0.41', '▲ +0.15', 'n.a.', '$1.2M of cost, no revenue', 'Benelux *', 'All regions'):
             self.assertIn(needed, texts)
         self.assertTrue(any(t.startswith('* Benelux: H1 2025 is above the full year.') for t in texts))
-        box = (48, 126, 864, 360)
+        box = (48, 143, 864, 343)
         self.assertGreaterEqual(g.left, box[0] * PT - PT)
         self.assertGreaterEqual(g.top, box[1] * PT - PT)
         self.assertLessEqual(g.left + g.width, (box[0] + box[2]) * PT + PT)
         self.assertLessEqual(g.top + g.height, (box[1] + box[3]) * PT + PT)
         self.assertIn('Nordics: FY 2025 2.40%', g._element.xpath('./p:nvGrpSpPr/p:cNvPr')[0].get('descr'))
-        outside = [s.text_frame.text for s in slide.shapes if s.has_text_frame]
-        self.assertEqual(outside[0], self.spec['claim'], 'the slide title is the claim')
-        self.assertEqual(outside[1], 'Travel cost per revenue dollar · travel cost / revenue')
+        title = [p.text for p in next(s for s in slide.shapes if s.name == 'Title').text_frame.paragraphs]
+        self.assertEqual(title, [self.spec['claim'], 'Travel cost per revenue dollar · travel cost / revenue'], 'the slide title is the claim')
 
     def test_into_replaces_a_named_shape_and_stays_in_its_box(self):
         deck = self.dir / 'deck.pptx'

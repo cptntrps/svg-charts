@@ -14,6 +14,10 @@
       two or three charts side by side in equal columns, each with its own claim above it
   python3 deck/chart.py --list deck.pptx --slide 3
       the shapes on a slide with their boxes, to choose --box or --replace
+  --subtitle "..." says what the numbers are (the measure, the unit, the period), in one or two lines under the
+      title; in an existing slide, at the top of the box. It is not a comment on the chart. For one chart the
+      default is the "title · unit" of the spec, and a subtitle given here takes its place.
+  --takeaway "..." is the comment: one or two bold lines with an accent bar under the chart.
 
 `charts.js` computes the geometry (through deck/render.mjs, so `node` is needed) and this script writes each
 mark as a native shape: bars are rectangles, lines are connectors and freeforms, slices are arcs, text is text.
@@ -50,13 +54,14 @@ INK_LEVEL = {'ink': 0.0, 'axis-text': 0.35, 'total': 0.5, 'muted': 0.7, 'grid': 
 VAR = re.compile(r'var\(\s*--chart-([\w-]+)\s*(?:,\s*([^)]+?)\s*)?\)')
 
 
-def render(spec_path, width, height, bare):
-    """The page chart of the spec at this size, from charts.js in strict mode."""
+def render(spec_path, width, height, frame='full'):
+    """The page chart of the spec at this size, from charts.js in strict mode.
+    frame: 'full' keeps the title, unit and source lines, 'source' the source only, 'none' leaves all out."""
     node = shutil.which('node')
     if not node:
         raise SpecError('node is not installed: charts.js computes the geometry of every chart but rankedTable')
     cmd = [node, os.path.join(HERE, 'render.mjs'), spec_path, '--width', str(int(width)), '--height', str(int(height))]
-    p = subprocess.run(cmd + (['--bare'] if bare else []), capture_output=True, text=True, encoding='utf-8')
+    p = subprocess.run(cmd + {'full': [], 'source': ['--bare-title'], 'none': ['--bare']}[frame], capture_output=True, text=True, encoding='utf-8')
     if p.returncode == 2:
         raise SpecError(p.stderr.strip())
     if p.returncode:
@@ -227,8 +232,10 @@ class Canvas:
         if el.get('fill-opacity') == '0' or (el.get('fill') in (None, 'none', 'transparent') and not el.get('stroke')):
             return                              # a hit area for a tooltip: a slide has no tooltip
         rx = min(float(el.get('rx', 0)), w / 2, h / 2)
-        shp = self.grp.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if rx > 0.2 else MSO_SHAPE.RECTANGLE,
-                                        Pt(self.ox + x), Pt(self.oy + y), Pt(max(w, 0.1)), Pt(max(h, 0.1)))
+        # Both edges are rounded first and the size is their difference, so bars on one baseline end on one unit.
+        x0, y0 = round((self.ox + x) * EMU), round((self.oy + y) * EMU)
+        x1, y1 = round((self.ox + x + max(w, 0.1)) * EMU), round((self.oy + y + max(h, 0.1)) * EMU)
+        shp = self.grp.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if rx > 0.2 else MSO_SHAPE.RECTANGLE, x0, y0, x1 - x0, y1 - y0)
         if rx > 0.2:
             shp.adjustments[0] = min(0.5, rx / min(w, h))
         self._style(shp, el)
@@ -418,25 +425,25 @@ def load(path):
     return spec
 
 
-def fit(path, spec, box, framed):
+def fit(path, spec, box, frame):
     """Check one chart against a box without a deck. Returns the receipt fields."""
     if spec['chart'] == 'rankedTable':
         rows, heads = rt.model(spec)
-        band = (22 if framed and (spec.get('title') or spec.get('unit')) else 0) + (16 if framed and spec.get('source') else 0)
+        band = (22 if frame == 'full' and (spec.get('title') or spec.get('unit')) else 0) + (16 if frame != 'none' and spec.get('source') else 0)
         rt.layout(spec, [box[0], box[1], box[2], box[3] - band])
         return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'rows': [r['label'] for r in rows], 'columns': heads}
-    d = render(path, box[2], box[3], bare=not framed)
+    d = render(path, box[2], box[3], frame)
     return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'used_pt': [d['width'], d['height']]}
 
 
-def place(slide, path, spec, box, framed, palette, dark, background):
+def place(slide, path, spec, box, frame, palette, dark, background):
     """Draw one chart into a box of the slide. Returns the receipt fields."""
     out = {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box]}
     if spec['chart'] == 'rankedTable':
-        g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame=framed)
+        g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame={'full': True, 'source': 'source', 'none': False}[frame])
         out.update(used_height_pt=round(g['height'], 1), rows=[r['label'] for r in g['rows']])
     else:
-        d = render(path, box[2], box[3], bare=not framed)
+        d = render(path, box[2], box[3], frame)
         canvas = draw_svg(slide, d, box, palette, dark, background)
         out.update(used_pt=[d['width'], d['height']], shapes=canvas.count)
     return out
@@ -490,12 +497,13 @@ def main(argv=None):
             raise SpecError('--title is for a slide with two or three charts; one chart takes its title from "claim"')
         head = {'claim': a.title} if many else spec
         if a.check:
-            box = rt.parse_box(a.box) if a.box else rt.new_deck_box(head)[3]
+            box = rt.parse_box(a.box) if a.box else rt.new_deck_box(head, a.subtitle)['box']
+            box = rt.furnish_box(box, a.subtitle if a.box else None, a.takeaway)[0]
             if many:
                 cols = side_by_side(specs, box)
-                print(json.dumps({'ok': True, 'charts': [fit(p, s, c[2], not a.bare) for (p, s), c in zip(specs, cols)]}))
+                print(json.dumps({'ok': True, 'charts': [fit(p, s, c[2], 'none' if a.bare else 'full') for (p, s), c in zip(specs, cols)]}))
             else:
-                print(json.dumps(dict(ok=True, **fit(path, spec, box, bool(a.box) and not a.bare))))
+                print(json.dumps(dict(ok=True, **fit(path, spec, box, 'none' if a.bare or not a.box else 'source' if a.subtitle else 'full'))))
             return 0
         if not a.out:
             raise SpecError('give --out')
@@ -507,6 +515,8 @@ def main(argv=None):
         prs, slide, box = rt.open_target(a, head)
         background = rt.background_rgb(prs, slide)
         dark = a.on == 'dark' if a.on else rt.is_dark(background)
+        # The subtitle of a new deck stands under its title. In an existing slide it stands at the top of the box.
+        box = rt.furnish(slide, box, a.subtitle if a.into else None, a.takeaway, dark, palette[0] if palette else None)
         receipt = {'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1}
         if many:
             from pptx.dml.color import RGBColor
@@ -524,10 +534,13 @@ def main(argv=None):
                 run.font.bold = True
                 if dark:
                     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                charts.append(place(slide, p, s, cbox, not a.bare, palette, dark, background))
+                charts.append(place(slide, p, s, cbox, 'none' if a.bare else 'full', palette, dark, background))
             receipt['charts'] = charts
         else:
-            receipt.update(place(slide, path, spec, box, bool(a.into) and not a.bare, palette, dark, background))
+            # One chart: a new deck has the subtitle and the source of the spec on the slide. In an existing slide the
+            # chart keeps its own lines; a subtitle given here takes the place of its "title · unit" line.
+            frame = 'none' if a.bare or not a.into else 'source' if a.subtitle else 'full'
+            receipt.update(place(slide, path, spec, box, frame, palette, dark, background))
         receipt['ink'] = 'light ink for a dark slide' if dark else 'theme text colour for a light slide'
         prs.save(a.out)
         print(json.dumps(receipt))

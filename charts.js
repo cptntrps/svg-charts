@@ -1124,7 +1124,8 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
 // chart(spec, { width, height, strict, bare }): width and height replace those of the spec. For a chart whose height
 // follows its rows, `height` is the room it has: the rows grow or shrink to use it, inside the limits of the type.
 // strict (a slide, a printed report): nothing may be cut or left out; an empty chart, a shortened label, labels that
-// overlap or a word without room throw a RangeError that names the remedy. bare leaves out title, unit and source.
+// overlap or a word without room throw a RangeError that names the remedy. bare leaves out title, unit and source;
+// bare: 'title' leaves out title and unit and keeps the source (the page or the slide has its own subtitle).
 // =====================================================================================
 const COMMON = ['chart', 'claim', 'title', 'unit', 'source', 'label', 'width', 'height', 'format', 'formatX'];
 const rowsFit = (opt, min, max) => ({ opt, min, max });
@@ -1199,7 +1200,7 @@ export function chart(spec, { width, height, strict = false, bare = false } = {}
   if (limit) throw new RangeError(`${what}: ${limit}`);
   const o = {};
   type.keys.forEach(k => { if (spec[k] !== undefined) o[k] = spec[k]; });
-  if (!bare && !type.noFrame) ['title', 'unit', 'source'].forEach(k => { if (spec[k] != null) o[k] = spec[k]; });
+  if (!type.noFrame) (bare === true ? [] : bare === 'title' ? ['source'] : ['title', 'unit', 'source']).forEach(k => { if (spec[k] != null) o[k] = spec[k]; });
   o.label = spec.label ?? spec.claim ?? spec.title;
   if (type.ownFormat) { if (spec.format) o.format = spec.format; }
   else if (spec.format) o.fmtY = formatter(spec.format);
