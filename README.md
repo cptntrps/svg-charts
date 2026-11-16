@@ -17,7 +17,7 @@ so a whole report can be one self-contained file with no external chart runtime.
 
 `lineChart` (with `area`), `barChart`, `hbarChart`, `waterfall`, `scatter`, `divergingBars`, `dumbbell`,
 `stackedBars`, `donut`, `heatmap`, `sparkline`, `groupedBars`, `stackedArea`, `slope`, `bullet`, `histogram`,
-`boxPlot`, `calendar`, `treemap`, `funnel`, `sankey`, `gauge`, `pareto`, `wordCloud`, `rankedTable`, plus helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
+`boxPlot`, `calendar`, `treemap`, `funnel`, `sankey`, `gauge`, `pareto`, `wordCloud`, `rankedTable`, plus `chart` (any of them from a JSON spec) and helpers `niceTicks`, `svg`, `esc`, `fin`, `palette`.
 
 ## Use
 
@@ -50,16 +50,25 @@ barChart({
 
 ## One spec for the page and the deck
 
-`rankedTable` (ranked bars with the exact values beside them) reads a plain JSON spec.
-[`deck/ranked_table.py`](./deck/ranked_table.py) draws the same file as native, editable PowerPoint shapes
-that take the colours and fonts of the deck theme (needs `python-pptx`):
+Every chart type also reads a plain JSON spec (`"chart": "lineChart"`, the data, a `claim`, a `format`).
+`chart(spec)` draws it on a page, and [`deck/chart.py`](./deck/chart.py) draws the same file as native,
+editable PowerPoint shapes that take the colours and fonts of the deck theme: bars are rectangles, lines
+are lines, slices are arcs, labels are text boxes. It needs `python-pptx` and `node`.
 
-```sh
-python3 deck/ranked_table.py examples/ranked-table.json --out chart.pptx
-python3 deck/ranked_table.py examples/ranked-table.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+```js
+import { chart } from './charts.js';
+el.innerHTML = chart(spec, { width: el.clientWidth });
 ```
 
-[`SKILL.md`](./SKILL.md) has the spec, the rules for an agent and the checks.
+```sh
+python3 deck/chart.py examples/waterfall.json --out chart.pptx
+python3 deck/chart.py examples/waterfall.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+```
+
+The code refuses a spec it cannot draw honestly (a spelling error in a field, 7 donut slices, a waterfall
+that does not reach its total) and, on a slide, anything that would be cut, hidden or overlapping.
+[`examples/`](./examples) has one spec per chart type. [`SKILL.md`](./SKILL.md) has the rules to choose the
+form and to fill the spec, and [`references/chart-rules.md`](./references/chart-rules.md) has the rules per chart type.
 
 Open [`demo.html`](./demo.html) for every chart with sample data in light and
 dark mode. The full option reference is in [`SKILL.md`](./SKILL.md).
@@ -68,11 +77,13 @@ dark mode. The full option reference is in [`SKILL.md`](./SKILL.md).
 
 ```sh
 npm test
-python3 -m unittest deck/test_ranked_table.py   # needs python-pptx
+python3 -m unittest discover -s deck   # needs python-pptx and node
 ```
 
 The suite (node:test, no dependencies) checks every builder against a stored
-snapshot and exercises the title, unit, source and annotation options.
+snapshot, exercises the title, unit, source and annotation options, and draws
+every spec file. The deck tests draw every spec file as a slide and compare its
+texts with those of the page chart.
 
 ## As a Claude skill
 

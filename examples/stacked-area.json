@@ -1,0 +1,24 @@
+{
+ "chart": "stackedArea",
+ "claim": "Monthly spend rose from $92k to $102k, and food made most of the rise",
+ "title": "Spend by category",
+ "unit": "$ thousand per month",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$", "suffix": "k" },
+ "totalLabels": true,
+ "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+ "series": [
+  {
+   "name": "Food",
+   "values": [22, 25, 21, 27, 24, 29]
+  },
+  {
+   "name": "Rent",
+   "values": [58, 58, 58, 60, 60, 60]
+  },
+  {
+   "name": "Other",
+   "values": [12, 9, 15, 11, 18, 13]
+  }
+ ]
+}

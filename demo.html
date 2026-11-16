@@ -44,11 +44,15 @@ OS between light and dark to see the theme follow.</p>
 <div class="card"><h2>dumbbell</h2><div id="db"></div></div>
 <div class="card"><h2>stackedBars</h2><div id="st"></div></div>
 <div class="card"><h2>title, unit, source and a callout</h2><div id="framed"></div></div>
-<div class="card"><h2>rankedTable (one spec file for the page and the deck)</h2><div id="rt"></div></div>
 <div class="card"><h2>legend, one colour per name, value labels</h2><div id="legend"></div><div id="legend2"></div></div>
 
+<h1 style="margin-top:40px">One spec file per chart</h1>
+<p class="lede">Each card below is a file of <code>examples/</code> drawn through <code>chart(spec)</code>. The heading
+is the claim of the spec. <code>deck/chart.py</code> draws the same file as native PowerPoint shapes.</p>
+<div id="specs"></div>
+
 <script type="module">
-import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, rankedTable } from './charts.js';
+import { lineChart, barChart, waterfall, scatter, divergingBars, dumbbell, stackedBars, chart } from './charts.js';
 
 const months = ['Jan','Feb','Mar','Apr','May','Jun'];
 const usd = v => '$' + v + 'k';
@@ -135,13 +139,22 @@ document.getElementById('legend2').innerHTML = barChart({
   ],
 });
 
-// The spec file is the one deck/ranked_table.py reads. The chart is drawn to the width of its card,
-// so a narrow page gets the stacked layout.
-const rt = document.getElementById('rt');
-fetch('./examples/ranked-table.json').then(r => r.json()).then(spec => {
-  const draw = () => { rt.innerHTML = rankedTable({ ...spec, width: Math.max(280, rt.clientWidth) }); };
-  draw(); new ResizeObserver(draw).observe(rt);
-}).catch(e => { rt.textContent = 'rankedTable: the spec did not load (' + e.message + ')'; });
+// Every spec file of examples/, drawn to the width of its card: a narrow page gets the narrow layout.
+const SPECS = ['bar-chart', 'hbar-chart', 'grouped-bars', 'ranked-table', 'pareto', 'bullet', 'gauge', 'line-chart', 'sparkline', 'slope',
+  'dumbbell', 'diverging-bars', 'waterfall', 'stacked-bars', 'stacked-area', 'donut', 'treemap', 'funnel', 'sankey', 'histogram',
+  'box-plot', 'scatter', 'heatmap', 'calendar', 'word-cloud'];
+const specs = document.getElementById('specs');
+SPECS.forEach(name => {
+  const card = specs.appendChild(Object.assign(document.createElement('div'), { className: 'card' }));
+  const head = card.appendChild(document.createElement('h2')), kind = card.appendChild(document.createElement('code'));
+  const el = card.appendChild(document.createElement('div'));
+  fetch(`./examples/${name}.json`).then(r => r.json()).then(spec => {
+    head.textContent = spec.claim; kind.textContent = `${spec.chart} · examples/${name}.json`;
+    if (spec.chart === 'sparkline') el.style.maxWidth = spec.width + 'px';
+    const draw = () => { el.innerHTML = chart(spec, { width: spec.chart === 'sparkline' ? undefined : Math.max(280, el.clientWidth) }); };
+    draw(); new ResizeObserver(draw).observe(el);
+  }).catch(e => { el.textContent = `${name}: the spec did not draw (${e.message})`; });
+});
 </script>
 </div>
 </body>

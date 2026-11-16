@@ -1,0 +1,14 @@
+{
+ "chart": "barChart",
+ "claim": "Search brings the most orders, 27% more than Direct",
+ "title": "Orders by channel",
+ "unit": "orders, second quarter",
+ "source": "Sample data",
+ "data": [
+  { "label": "Search", "value": 1240, "series": "Orders" },
+  { "label": "Direct", "value": 980, "series": "Orders" },
+  { "label": "Social", "value": 860, "series": "Orders" },
+  { "label": "Email", "value": 640, "series": "Orders" },
+  { "label": "Referral", "value": 410, "series": "Orders" }
+ ]
+}

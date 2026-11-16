@@ -1,0 +1,14 @@
+{
+ "chart": "bullet",
+ "claim": "Dining is over its budget; groceries and shopping are inside theirs",
+ "title": "Spend against budget",
+ "unit": "$, this month",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "overColor": "#d03b3b",
+ "rows": [
+  { "label": "Groceries", "value": 495, "target": 600 },
+  { "label": "Dining", "value": 487, "target": 400 },
+  { "label": "Shopping", "value": 120, "target": 300 }
+ ]
+}

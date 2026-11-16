@@ -1,0 +1,16 @@
+{
+ "chart": "waterfall",
+ "claim": "Discounts take more than half of the gap between gross and net revenue",
+ "title": "Gross to net revenue",
+ "unit": "$ thousand",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$", "suffix": "k" },
+ "zoom": true,
+ "items": [
+  { "label": "Gross", "value": 300, "total": true },
+  { "label": "Discounts", "value": -46 },
+  { "label": "Returns", "value": -22 },
+  { "label": "Fees", "value": -18 },
+  { "label": "Net", "value": 214, "total": true }
+ ]
+}

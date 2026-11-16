@@ -1,0 +1,25 @@
+{
+ "chart": "scatter",
+ "claim": "Weeks with more ad spend bring more orders: about 21 more orders per $1,000",
+ "title": "Ad spend and orders",
+ "unit": "one point per week",
+ "source": "Sample data",
+ "xLabel": "weekly ad spend",
+ "yLabel": "weekly orders",
+ "formatX": { "decimals": 0, "prefix": "$" },
+ "groups": [
+  {
+   "name": "Weeks",
+   "line": { "fit": "linear" },
+   "points": [
+    { "x": 6200, "y": 150 },
+    { "x": 8100, "y": 205 },
+    { "x": 9700, "y": 220 },
+    { "x": 12000, "y": 300 },
+    { "x": 14500, "y": 330 },
+    { "x": 16800, "y": 360 },
+    { "x": 19000, "y": 430 }
+   ]
+  }
+ ]
+}

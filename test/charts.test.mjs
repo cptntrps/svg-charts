@@ -464,3 +464,112 @@ test('rankedTable: a spec the chart cannot show honestly throws', () => {
   const neg = charts.rankedTable({ ...base, format: { decimals: 1, prefix: '$' }, rows: [{ label: 'a', value: 1, cols: [2, -4.1] }], change: { from: 0, to: 1 } });
   assert.ok(neg.includes('>−$4.1<') && neg.includes('>▼ −6.1<'), 'a negative number in a column takes the minus sign of the change column');
 });
+
+// ---------- chart(spec): one JSON spec for every chart type ----------
+import { readdirSync } from 'node:fs';
+const exDir = join(here, '..', 'examples');
+const examples = readdirSync(exDir).filter(f => f.endsWith('.json')).map(f => [f, JSON.parse(readFileSync(join(exDir, f), 'utf8'))]);
+
+test('examples: there is one spec file for each chart type', () => {
+  assert.deepEqual(examples.map(([, s]) => s.chart).sort(), Object.keys(charts.chartTypes).sort());
+});
+
+for (const [file, spec] of examples) {
+  test(`examples/${file}: draws at slide size in strict mode and at phone width`, () => {
+    const slide = charts.chart(spec, { width: 864, height: 360, strict: true });
+    assert.ok(slide.startsWith('<svg '), 'an svg');
+    assert.ok(+slide.match(/viewBox="0 0 864 ([\d.]+)"/)[1] <= 360.5, 'inside the room it has');
+    assert.ok(spec.claim && spec.claim.length > 20, 'the example has a claim');
+    assert.ok(!slide.includes(spec.claim.slice(0, 20) + '</text>'), 'the chart does not draw the claim');
+    assert.ok(charts.chart(spec, { width: 358 }).startsWith('<svg '));
+  });
+}
+
+test('chart: a bad spec names the problem', () => {
+  const bar = { chart: 'barChart', data: [{ label: 'A', value: 1 }, { label: 'B', value: 2 }] };
+  assert.throws(() => charts.chart({ ...bar, chart: 'pie' }), /"chart" must be one of/);
+  assert.throws(() => charts.chart({ ...bar, dat: [] }), /does not take "dat"/);
+  assert.throws(() => charts.chart({ chart: 'stackedBars', format: { decimals: 1 }, keys: ['a'], columns: [] }), /remove "format"/);
+  assert.throws(() => charts.chart({ ...bar, formatX: {} }), /remove "formatX"/);
+  assert.throws(() => charts.chart([]), /must be an object/);
+});
+
+test('chart: more items than a reader can tell apart are refused', () => {
+  const slices = Array.from({ length: 7 }, (_, i) => ({ label: 'S' + i, value: i + 1 }));
+  assert.throws(() => charts.chart({ chart: 'donut', slices }), /6 slices at most/);
+  const series = n => Array.from({ length: n }, (_, i) => ({ name: 'S' + i, values: [1, 2], points: [{ x: 'a', y: 1 }] }));
+  assert.throws(() => charts.chart({ chart: 'groupedBars', categories: ['a', 'b'], series: series(5) }), /4 series at most/);
+  assert.throws(() => charts.chart({ chart: 'lineChart', labels: ['a'], series: series(6) }), /share the 5 palette colours/);
+  const coloured = Object.fromEntries(series(6).map(s => [s.name, '#888888']));
+  assert.ok(charts.chart({ chart: 'lineChart', labels: ['a'], series: series(6), colors: coloured }).startsWith('<svg '));
+});
+
+test('chart: a waterfall must reach its total and a funnel only loses', () => {
+  const items = [{ label: 'Start', value: 10, total: true }, { label: 'Step', value: -3 }, { label: 'End', value: 8, total: true }];
+  assert.throws(() => charts.chart({ chart: 'waterfall', items }), /reach 7 and the total says 8/);
+  items[2].value = 7;
+  assert.ok(charts.chart({ chart: 'waterfall', items }).includes('End'));
+  assert.throws(() => charts.chart({ chart: 'funnel', stages: [{ label: 'a', value: 3 }, { label: 'b', value: 5 }] }), /a funnel only loses/);
+});
+
+test('chart: format is the JSON form of fmtY and formatX of fmtX', () => {
+  const out = charts.chart({ chart: 'barChart', format: { decimals: 1, prefix: '$', suffix: 'k' }, data: [{ label: 'A', value: 1234.56 }] });
+  assert.ok(out.includes('>$1,234.6k<'));
+  const sc = charts.chart({ chart: 'scatter', formatX: { suffix: ' km' }, groups: [{ name: 'g', points: [{ x: 10, y: 1 }, { x: 20, y: 2 }, { x: 30, y: 4 }], line: { fit: 'linear' } }] });
+  assert.ok(sc.includes(' km<'), 'x ticks take formatX');
+  assert.ok(/<polyline[^>]*stroke-dasharray="6 4"/.test(sc), 'the fitted line is drawn');
+  assert.throws(() => charts.chart({ chart: 'scatter', groups: [{ name: 'g', points: [{ x: 1, y: 1 }], line: { fit: 'linear' } }] }), /3 points or more/);
+});
+
+test('chart: a chart whose height follows its rows uses the room it has', () => {
+  const data = n => Array.from({ length: n }, (_, i) => ({ label: 'Row ' + i, value: i + 1 }));
+  const h = out => +out.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
+  assert.ok(h(charts.chart({ chart: 'hbarChart', data: data(10) }, { width: 600, height: 300 })) <= 300);
+  assert.ok(h(charts.chart({ chart: 'hbarChart', data: data(10) }, { width: 600, height: 300 })) > 260, 'rows grow to use the room');
+  assert.equal(h(charts.chart({ chart: 'hbarChart', data: data(3) }, { width: 600, height: 300 })), 132, 'rows stop at the largest row size');
+  assert.throws(() => charts.chart({ chart: 'hbarChart', data: data(30) }, { width: 600, height: 300 }), /30 rows need 612px of height and have 300px/);
+  assert.throws(() => charts.chart({ chart: 'dumbbell', rows: data(12).map(d => ({ label: d.label, a: 1, b: 2 })) }, { width: 600, height: 300 }), /needs \d+px of height and has 300px/);
+  const days = Array.from({ length: 365 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, 1) + i * 864e5).toISOString().slice(0, 10), value: i % 4 }));
+  assert.ok(h(charts.chart({ chart: 'calendar', days }, { width: 864, height: 360 })) <= 360);
+});
+
+test('chart strict: nothing is cut, hidden or overlapping', () => {
+  const opt = { width: 600, height: 300, strict: true };
+  assert.throws(() => charts.chart({ chart: 'barChart', data: [] }, opt), /no data to draw/);
+  const long = [{ label: 'A warehouse club with a very long name that cannot fit in the label column of this chart', value: 5 }, { label: 'B', value: 3 }];
+  assert.throws(() => charts.chart({ chart: 'hbarChart', data: long }, opt), /is cut: shorten it/);
+  assert.ok(charts.chart({ chart: 'hbarChart', data: long }, { ...opt, strict: false }).includes('…'), 'a page cuts the label and keeps the tooltip');
+  const bars = Array.from({ length: 12 }, (_, i) => ({ label: 'Category number ' + i, value: i + 1 }));
+  assert.throws(() => charts.chart({ chart: 'barChart', data: bars }, opt), /wider than its bar slot/);
+  const items = [{ label: 'Big', value: 1000 }, { label: 'Tiny item', value: 1 }];
+  assert.throws(() => charts.chart({ chart: 'treemap', items }, opt), /"Tiny item" is too small to show its name/);
+  const words = Array.from({ length: 80 }, (_, i) => ({ text: 'averylongword' + i, value: 80 - i }));
+  assert.throws(() => charts.chart({ chart: 'wordCloud', words }, opt), /words have no room/);
+});
+
+test('chart: bare leaves out title, unit and source', () => {
+  const spec = examples.find(([, s]) => s.chart === 'barChart')[1];
+  assert.ok(charts.chart(spec).includes('Source: Sample data'));
+  const bare = charts.chart(spec, { bare: true });
+  assert.ok(!bare.includes('Source:') && !bare.includes(spec.title));
+});
+
+test('lineChart: a value label does not sit on the target line', () => {
+  const spec = examples.find(([, s]) => s.chart === 'lineChart')[1], out = charts.chart(spec, { width: 864, height: 360 });
+  const targetY = +out.match(/y1="([\d.]+)" y2="[\d.]+" stroke="var\(--chart-target/)[1];
+  const labels = [...out.matchAll(/<text x="[\d.]+" y="([\d.]+)"[^>]*font-size="11"[^>]*>(\d+)<\/text>/g)].map(m => [+m[1], m[2]]);
+  assert.equal(labels.length, 6, 'each point keeps its value');
+  for (const [y, t] of labels) assert.ok(targetY < y - 13 || targetY > y + 5, `label ${t} at ${y} is clear of the target line at ${targetY}`);
+});
+
+test('donut: on a wide chart the values stay near their labels', () => {
+  const out = charts.donut({ ...fixtures.donut, width: 1000, height: 300 });
+  const label = +out.match(/<text x="([\d.]+)"[^>]*>Produce</)[1], value = +out.match(/<text x="([\d.]+)"[^>]*text-anchor="end"[^>]*>[^<]*33%</)?.[1];
+  assert.ok(value - label <= 380, `value column ${value} is within 380px of the labels at ${label}`);
+});
+
+test('stackedArea: totalLabels writes the first and the last total', () => {
+  const spec = examples.find(([, s]) => s.chart === 'stackedArea')[1], out = charts.chart(spec, { width: 864, height: 360 });
+  assert.ok(out.includes('>$92k</text>') && out.includes('>$102k</text>'), 'the totals the claim names are in the chart');
+  assert.ok(!charts.chart({ ...spec, totalLabels: false }).includes('>$92k</text>'));
+});

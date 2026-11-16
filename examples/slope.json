@@ -1,0 +1,17 @@
+{
+ "chart": "slope",
+ "claim": "Avocado is the one item whose price fell from January to June",
+ "title": "Unit price",
+ "unit": "$ per 10 units",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "aLabel": "January",
+ "bLabel": "June",
+ "rows": [
+  { "label": "Eggs", "a": 35, "b": 48 },
+  { "label": "Salmon", "a": 110, "b": 135 },
+  { "label": "Milk", "a": 53, "b": 57 },
+  { "label": "Avocado", "a": 55, "b": 39 },
+  { "label": "Bread", "a": 40, "b": 40 }
+ ]
+}

@@ -173,9 +173,9 @@ def _fill_rgb(el, master):
     return rgb.get('val') if rgb is not None else _theme_rgb(master, scheme.get('val')) if scheme is not None else None
 
 
-def background_is_dark(prs, slide):
-    """True when the slide stands on a dark background: a full-size filled shape on the slide, its layout
-    or its master, or else the background fill. A picture background cannot be read: pass --on dark."""
+def background_rgb(prs, slide):
+    """The RGB of the slide background: a full-size filled shape on the slide, its layout or its master,
+    or else the background fill. None when it cannot be read (a picture background): pass --on dark."""
     master = slide.slide_layout.slide_master
     rgb = None
     for part in (slide, slide.slide_layout, master):
@@ -188,21 +188,34 @@ def background_is_dark(prs, slide):
             rgb = _fill_rgb(bg[0], master)
         if rgb:
             break
+    return rgb
+
+
+def is_dark(rgb):
     if not rgb:
         return False
     r, g, b = (int(rgb[i:i + 2], 16) / 255 for i in (0, 2, 4))
     return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.35
 
 
-def draw(slide, spec, box, accent=None, dark=False):
-    """Draw the chart into the slide as one group of native shapes. Returns the layout."""
+def background_is_dark(prs, slide):
+    """True when the slide stands on a dark background."""
+    return is_dark(background_rgb(prs, slide))
+
+
+def draw(slide, spec, box, accent=None, dark=False, frame=False):
+    """Draw the chart into the slide as one group of native shapes. Returns the layout.
+    frame=True also writes "title · unit" above the chart and the source under it, inside the box."""
     from pptx.dml.color import RGBColor
     from pptx.enum.dml import MSO_THEME_COLOR
     from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
     from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
     from pptx.util import Pt
 
-    g = layout(spec, box)
+    head = [str(spec[k]) for k in ('title', 'unit') if frame and spec.get(k)]
+    foot = f"Source: {spec['source']}" if frame and spec.get('source') else None
+    band_top, band_bottom = (22 if head else 0), (16 if foot else 0)
+    g = layout(spec, (box[0], box[1] + band_top, box[2], box[3] - band_top - band_bottom))
     grp = slide.shapes.add_group_shape()
     grp.name = 'Ranked table'
     highlight = spec.get('highlight')
@@ -288,6 +301,17 @@ def draw(slide, spec, box, accent=None, dark=False):
         rule(xt, ya, xt, yb, 0.35)
     for i, ln in enumerate(g['notes']):
         text(ln, g['x'], g['top'] + g['rh'] * len(g['rows']) + 6 + i * NOTE_H, g['w'], NOTE_H, FS_NOTE, PP_ALIGN.LEFT, 0.35)
+    if head:
+        tb = text(spec['title'] if spec.get('title') else head[0], box[0], box[1], box[2], 18, 14, PP_ALIGN.LEFT,
+                  0.0 if spec.get('title') else 0.35, bold=bool(spec.get('title')))
+        if spec.get('title') and spec.get('unit'):
+            run = tb.text_frame.paragraphs[0].add_run()
+            run.text = f" · {spec['unit']}"
+            run.font.size = Pt(14)
+            run.font.bold = False
+            ink(run.font.color, 0.35)
+    if foot:
+        text(foot, box[0], g['top'] - HEAD_H + g['height'] + 2, box[2], 14, 10, PP_ALIGN.LEFT, 0.35)
     alt = '; '.join(f"{r['label']}: " + (', '.join(f'{h} {c}' for h, c in zip(g['heads'], r['cells'])) if r.get('value') is not None
                                            else r['note']) for r in g['rows'])
     grp._element.xpath('./p:nvGrpSpPr/p:cNvPr')[0].set('descr', f"{spec.get('title', 'Ranked table')}. {alt}")
@@ -303,8 +327,7 @@ def list_shapes(path, slide_no):
          'text': (s.text_frame.text[:60] if s.has_text_frame else '')} for s in slide.shapes]}, indent=1))
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description='Ranked bars with a table as native PowerPoint shapes.')
+def add_target_args(ap):
     ap.add_argument('spec', nargs='?')
     ap.add_argument('--out')
     ap.add_argument('--into')
@@ -315,6 +338,83 @@ def main(argv=None):
     ap.add_argument('--on', choices=['light', 'dark'], help='background of the slide; read from the deck when not given')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--list')
+
+
+def parse_box(text):
+    try:
+        box = [float(v) for v in text.split(',')]
+    except ValueError:
+        box = []
+    if len(box) != 4:
+        raise SpecError('--box takes x,y,w,h in points')
+    return box
+
+
+def new_deck_box(spec):
+    """Title lines and the chart box of the one-slide deck that --out writes."""
+    head = wrap(spec.get('claim') or spec.get('title') or '', 864, 24, 0.56)
+    if len(head) > 3:
+        raise SpecError(f'the claim needs {len(head)} lines at 24pt, the slide holds 3: shorten it')
+    head_h = 30 * max(1, len(head))
+    sub = ' · '.join(str(spec[k]) for k in (('title', 'unit') if spec.get('claim') else ('unit',)) if spec.get(k))
+    top = 36 + head_h + (30 if sub else 10)
+    return head, head_h, sub, [48, top, 864, 486 - top]
+
+
+def open_target(a, spec):
+    """The deck, the slide and the box (x, y, w, h in points) the chart goes to.
+    With --into: an existing slide, the box of --replace (that shape is removed) or --box.
+    Without: a new 16:9 deck with one slide: the claim as its title, "title · unit" under it, the source at the bottom."""
+    from pptx import Presentation
+    from pptx.util import Pt
+    if a.into:
+        prs = Presentation(a.into)
+        if not 1 <= a.slide <= len(prs.slides):
+            raise SpecError(f'--slide {a.slide}: the deck has {len(prs.slides)} slides')
+        slide = prs.slides[a.slide - 1]
+        if a.replace:
+            old = [s for s in slide.shapes if s.name == a.replace]
+            if len(old) != 1:
+                raise SpecError(f'--replace "{a.replace}": {len(old)} shapes have that name on slide {a.slide}; see --list')
+            box = [v / 12700 for v in (old[0].left, old[0].top, old[0].width, old[0].height)]
+            old[0]._element.getparent().remove(old[0]._element)
+        elif a.box:
+            box = parse_box(a.box)
+        else:
+            raise SpecError('--into needs --box x,y,w,h or --replace "<shape name>"')
+        sw, sh = prs.slide_width / 12700, prs.slide_height / 12700
+        if box[0] < 0 or box[1] < 0 or box[0] + box[2] > sw + 0.5 or box[1] + box[3] > sh + 0.5:
+            raise SpecError(f'the box {box} is outside the {sw:.0f}x{sh:.0f}pt slide')
+        return prs, slide, box
+    head, head_h, sub, box = new_deck_box(spec)
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Pt(960), Pt(540)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    from pptx.enum.text import PP_ALIGN
+
+    def line(s, top, size, bold, height):
+        tb = slide.shapes.add_textbox(Pt(48), Pt(top), Pt(864), Pt(height))
+        tb.text_frame.word_wrap = True
+        tb.text_frame.margin_left = tb.text_frame.margin_right = 0
+        p = tb.text_frame.paragraphs[0]
+        p.alignment = PP_ALIGN.LEFT
+        run = p.add_run()
+        run.text = s
+        run.font.size = Pt(size)
+        run.font.bold = bold
+    # The slide title is the claim (the finding as a sentence); the short title and the unit go under it.
+    if head:
+        line(' '.join(head), 32, 24, True, head_h)
+    if sub:
+        line(sub, 36 + head_h, 12, False, 20)
+    if spec.get('source'):
+        line(f"Source: {spec['source']}", 496, 9, False, 16)
+    return prs, slide, box
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description='Ranked bars with a table as native PowerPoint shapes.')
+    add_target_args(ap)
     a = ap.parse_args(argv)
     try:
         if a.list:
@@ -330,58 +430,7 @@ def main(argv=None):
             return 0
         if not a.out:
             raise SpecError('give --out')
-        from pptx import Presentation
-        from pptx.util import Pt
-        if a.into:
-            prs = Presentation(a.into)
-            if not 1 <= a.slide <= len(prs.slides):
-                raise SpecError(f'--slide {a.slide}: the deck has {len(prs.slides)} slides')
-            slide = prs.slides[a.slide - 1]
-            if a.replace:
-                old = [s for s in slide.shapes if s.name == a.replace]
-                if len(old) != 1:
-                    raise SpecError(f'--replace "{a.replace}": {len(old)} shapes have that name on slide {a.slide}; see --list')
-                box = [v / 12700 for v in (old[0].left, old[0].top, old[0].width, old[0].height)]
-                old[0]._element.getparent().remove(old[0]._element)
-            elif a.box:
-                box = [float(v) for v in a.box.split(',')]
-                if len(box) != 4:
-                    raise SpecError('--box takes x,y,w,h in points')
-            else:
-                raise SpecError('--into needs --box x,y,w,h or --replace "<shape name>"')
-            sw, sh = prs.slide_width / 12700, prs.slide_height / 12700
-            if box[0] < 0 or box[1] < 0 or box[0] + box[2] > sw + 0.5 or box[1] + box[3] > sh + 0.5:
-                raise SpecError(f'the box {box} is outside the {sw:.0f}x{sh:.0f}pt slide')
-        else:
-            prs = Presentation()
-            prs.slide_width, prs.slide_height = Pt(960), Pt(540)
-            slide = prs.slides.add_slide(prs.slide_layouts[6])
-            from pptx.enum.text import PP_ALIGN
-            # The slide title is the claim (the finding as a sentence); the short title and the unit go under it.
-            head = wrap(spec.get('claim') or spec.get('title') or '', 864, 24, 0.56)
-            if len(head) > 3:
-                raise SpecError(f'the claim needs {len(head)} lines at 24pt, the slide holds 3: shorten it')
-            head_h = 30 * max(1, len(head))
-            sub = ' · '.join(str(spec[k]) for k in (('title', 'unit') if spec.get('claim') else ('unit',)) if spec.get(k))
-            top = 36 + head_h + (30 if sub else 10)
-            box = [48, top, 864, 486 - top]
-
-            def line(s, top, size, bold, height):
-                tb = slide.shapes.add_textbox(Pt(48), Pt(top), Pt(864), Pt(height))
-                tb.text_frame.word_wrap = True
-                tb.text_frame.margin_left = tb.text_frame.margin_right = 0
-                p = tb.text_frame.paragraphs[0]
-                p.alignment = PP_ALIGN.LEFT
-                run = p.add_run()
-                run.text = s
-                run.font.size = Pt(size)
-                run.font.bold = bold
-            if head:
-                line(' '.join(head), 32, 24, True, head_h)
-            if sub:
-                line(sub, 36 + head_h, 12, False, 20)
-            if spec.get('source'):
-                line(f"Source: {spec['source']}", 496, 9, False, 16)
+        prs, slide, box = open_target(a, spec)
         dark = a.on == 'dark' if a.on else background_is_dark(prs, slide)
         g = draw(slide, spec, box, a.accent, dark)
         prs.save(a.out)

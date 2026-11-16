@@ -1,0 +1,15 @@
+{
+ "chart": "hbarChart",
+ "claim": "The warehouse club takes almost half of the spend",
+ "title": "Spend by store",
+ "unit": "$, last 12 months",
+ "source": "Sample data",
+ "format": { "decimals": 0, "prefix": "$" },
+ "highlight": [0],
+ "data": [
+  { "label": "Warehouse club", "value": 4210 },
+  { "label": "Corner market", "value": 2380 },
+  { "label": "Online", "value": 1675 },
+  { "label": "Bakery", "value": 310 }
+ ]
+}

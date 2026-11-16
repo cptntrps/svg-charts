@@ -1,14 +1,12 @@
 ---
 name: svg-charts
-description: Use when a page, report, or dashboard needs charts (line, area, stacked area, bar, grouped bar, horizontal bar, waterfall, pareto, scatter, diverging, dumbbell, slope, stacked, donut, treemap, heatmap, calendar, histogram, box plot, bullet, gauge, funnel, sankey, word cloud, sparkline, ranked bars with a table) without a charting library, or when the same chart must also go on a PowerPoint slide (ranked bars with a table, as native shapes). Builds charts as plain inline-SVG strings that theme with CSS variables, render server-side or in the browser, and need no runtime, canvas, or network.
+description: Use when a page, report, dashboard or PowerPoint slide needs a chart (line, area, stacked area, bar, grouped bar, horizontal bar, ranked bars with a table, waterfall, pareto, scatter, diverging, dumbbell, slope, stacked, donut, treemap, heatmap, calendar, histogram, box plot, bullet, gauge, funnel, sankey, word cloud, sparkline) without a charting library. One JSON spec file per chart draws the page chart as a plain inline-SVG string and the slide chart as native, editable PowerPoint shapes in the deck theme, so the numbers agree. Gives the rules to choose the chart form and to fill the spec.
 ---
 
 # svg-charts
 
-Build charts as **plain inline-SVG strings**. No Chart.js, D3, Plotly, canvas,
-or CDN. Each builder is a pure function that returns an `<svg>` string you drop
-into `innerHTML` or write into a server-rendered page. The output is one
-self-contained file with no external chart runtime.
+One JSON spec per chart. `charts.js` draws it as a **plain inline-SVG string** for a page, and `deck/chart.py`
+draws the same file as **native PowerPoint shapes** for a slide. No Chart.js, D3, Plotly, canvas or CDN.
 
 ## When to use this
 
@@ -16,37 +14,177 @@ self-contained file with no external chart runtime.
 - The environment blocks external scripts (strict CSP, air-gapped, email-safe).
 - You render HTML server-side and want charts in the string, not after hydration.
 - You want charts that follow the page theme (light/dark) through CSS variables.
+- The same chart must also go on a PowerPoint slide, as shapes a person can edit, in the look of the deck.
+- An agent must build charts by rule: the spec is plain JSON and the code refuses what it cannot draw honestly.
 
 Do **not** reach for this when the page needs live pan/zoom, brushing, or
 animated transitions across thousands of points. Use a full charting library
 there.
 
-## How to use it
+## The procedure
 
-`charts.js` is one ES module with named exports. Import it, call a builder, and
-insert the returned string.
+1. Write the claim: one sentence with the finding. It decides everything else.
+2. Choose the form from the reader's question (the table below).
+3. Read the section of that chart in `references/chart-rules.md` and copy its file from `examples/`.
+4. Fill the spec with numbers from the source. Write each number once.
+5. Draw the page with `chart(spec)` and the slide with `deck/chart.py`. Both read the same file.
+6. Look at the renders, then hand over ("Before you hand over").
 
-```js
-import { lineChart, barChart } from './charts.js';
+## Choose the form
 
-document.getElementById('revenue').innerHTML = lineChart({
-  label: 'Monthly revenue against plan',
-  labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-  series: [{ name: 'Actual', points: [
-    { x: 'Jan', y: 120 }, { x: 'Feb', y: 140 }, { x: 'Mar', y: 135 },
-    { x: 'Apr', y: 162 }, { x: 'May', y: 180 }, { x: 'Jun', y: 205 }] }],
-  target: 150,
-  fmtY: v => '$' + v + 'k',
-});
+| The reader's question | Chart |
+|---|---|
+| How large is each of a few categories? | `barChart` (short names), `hbarChart` (long names, ranking, narrow page) |
+| Which item is highest, and what are its exact numbers? Or one item of the ranking has no value | `rankedTable` |
+| How do two to four series compare inside each category? | `groupedBars` |
+| Do a few items make most of the total? | `pareto` |
+| Is each value above or below its own target? | `bullet`; one value toward a limit: `gauge` |
+| How does a value move across four or more periods? | `lineChart`; the shape only, beside a number: `sparkline` |
+| Did each item rise or fall between two moments? | `slope` (direction), `dumbbell` (size of the gap) |
+| Which categories rose and which fell, and by how much? | `divergingBars`, or `hbarChart` with `diverging` |
+| Which steps lead from a start value to an end value? | `waterfall` |
+| How does the mix change between columns? | `stackedBars` |
+| How do a total and its parts move over time? | `stackedArea` |
+| How is one total divided? | `donut` (6 parts at most), `treemap` (5 to 15 parts) |
+| How many remain at each stage? | `funnel` |
+| Where does an amount come from and where does it go? | `sankey` |
+| How are the values of one measure spread? | `histogram`; per group: `boxPlot` |
+| Do two measures move together? | `scatter` |
+| Where is a value high and low across two dimensions? | `heatmap`; per day over weeks: `calendar` |
+| Which words carry a text? | `wordCloud` |
+| One number is the message | no chart: write the number large, with its unit |
+| More than 12 items, or the reader needs every exact value | a table |
+
+## The spec
+
+```json
+{
+  "chart": "barChart",
+  "claim": "Search brings the most orders, 27% more than Direct",
+  "title": "Orders by channel", "unit": "orders, second quarter", "source": "Sample data",
+  "format": { "decimals": 0 },
+  "data": [
+    { "label": "Search", "value": 1240, "series": "Orders" },
+    { "label": "Direct", "value": 980, "series": "Orders" }
+  ]
+}
 ```
 
-Server-side is identical: the function returns a string, so write it straight
-into the page you generate. No DOM is required to build the SVG.
+| Field | Meaning |
+|---|---|
+| `chart` | the chart type: a builder name from the table above |
+| `claim` | the finding as one sentence. It is the page heading and the slide title; the chart does not draw it |
+| `title`, `unit`, `source` | the short name of the measure, its unit and period, the source of the numbers |
+| `format` | `{ decimals, prefix, suffix }` for the values: `{ "decimals": 1, "suffix": "%" }`, `{ "prefix": "$", "suffix": "k" }` |
+| `formatX` | the same for the x axis of `scatter` and `histogram` |
+| `label` | the accessible name; the claim when not given |
+| `width`, `height` | the size on a page; the caller and the slide box replace them |
+| the data fields | per chart type: see `references/chart-rules.md` and the builders table below |
 
-## Builders
+The code refuses a spec it cannot draw honestly, with a message that names the remedy:
 
-Every builder takes one options object and returns an SVG string. Common
-options:
+- a field the chart does not take (a spelling error does not pass in silence);
+- a value outside the chart's domain (a negative bar, a zero slice, an unknown heatmap row);
+- more items than can be told apart: 7 donut slices, 5 grouped series, 6 series that share the 5 palette colours;
+- a waterfall whose steps do not reach its total, a funnel stage larger than the stage before it;
+- on a slide (strict mode): no data, a label that is cut, labels that overlap, a treemap tile or a sankey
+  node too small to show its name, a word without room, content taller than its box.
+
+## Rules for the agent
+
+These hold for every chart. The rules of each chart type are in `references/chart-rules.md`.
+
+1. The claim goes in the heading: the page heading and the slide title are the `claim`, a full sentence
+   with the finding. `title` in the spec is only the short name of the measure.
+2. Every number in the claim is in the chart, at the same precision. When the chart type cannot show a
+   number (a part of a stacked area), write the claim without it or choose a form that shows it.
+3. Use only numbers from the source, and name the source. `unit` names the unit and the period.
+   A number you compute from the source (a sum, a share, a difference) is permitted: compute it with code,
+   and make sure the reader can compute it again from the numbers the chart shows.
+4. Write one spec file and give it to both renderers. Do not type the numbers a second time.
+5. Colour says which thing a mark is. Give one series one colour. Do not give each bar its own colour.
+   Use `highlight` or `colors` only for the items the claim names. One name keeps one colour across the
+   charts of a report: pass the same `colors` object to each spec.
+6. A value that does not exist is not zero. Leave it out or mark it the way the chart type gives
+   (`null`, a note row), and say that it is missing. Missing data limits the claim: write "reported spend",
+   not "spend". When the numbers of the source do not agree with each other, that is the claim: state it,
+   draw what the source gives, and do not repair the numbers.
+7. Do not draw more than the reader can tell apart. Join small items as "Other" and put it last.
+8. One chart answers one question. For two measures of different units, draw two charts.
+9. When the code refuses the spec, change the content (shorter labels, fewer items, a different form).
+   Do not make the text smaller and do not edit the output by hand.
+
+## On a page
+
+```js
+import { chart } from './charts.js';
+const spec = await (await fetch('./spec.json')).json();
+heading.textContent = spec.claim;                       // the page heading is the claim
+const draw = () => { el.innerHTML = chart(spec, { width: Math.max(280, el.clientWidth) }); };
+draw(); new ResizeObserver(draw).observe(el);
+```
+
+`chart(spec, { width, height, strict, bare })` returns the SVG string. Server-side is identical: no DOM is
+needed. Pass the width of the container. `height` is the room the chart has: a chart whose height follows
+its rows (`hbarChart`, `heatmap`, `bullet`, `boxPlot`, `funnel`, `calendar`) then sizes its rows to that room.
+`strict: true` applies the slide checks (for a printed report or an image). `bare: true` leaves out the
+title, unit and source lines. On a page a label wider than its place is cut with an ellipsis and the
+tooltip has the full text.
+
+## On a slide
+
+```sh
+python3 deck/chart.py spec.json --check                          # the spec and the fit at slide size
+python3 deck/chart.py spec.json --out chart.pptx                 # a new 16:9 deck: one slide, the claim as its title
+python3 deck/chart.py --list deck.pptx --slide 3                 # shapes and boxes of a slide
+python3 deck/chart.py spec.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+python3 deck/chart.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 --out deck2.pptx
+```
+
+`--out` alone writes one slide: the claim as the title, "title · unit" under it, the chart, the source.
+`--into` draws into a slide of an existing deck: write the claim into the slide's own title. `--replace`
+gives the chart the box of a named shape and removes that shape; `--box` is x, y, width and height in
+points. The chart keeps its "title · unit" line and its source line; `--bare` leaves them out when the
+slide has its own places for them.
+
+The chart is one group of native shapes that a person can edit in PowerPoint: bars are rectangles, lines
+are lines, slices are arcs, each label is a text box, and each mark has its tooltip text as its name.
+One point on the slide is one pixel of the page chart, so the text keeps the size the builder gives it
+(10 to 14pt). Colours and fonts come from the deck theme: accents 1 to 5 for the palette, text 1 for the
+ink, so the chart takes the look of the template. `--palette RRGGBB,RRGGBB` (or `--accent RRGGBB`) forces
+colours. A colour you set in the spec is kept: write `var(--chart-2,#0ca37a)` for a theme colour (the page
+uses the variable, or the fallback when the page does not set it; the slide uses accent 2) or `#RRGGBB` for a
+fixed one. On a dark slide the ink is light; the script reads the background from the deck, and `--on dark`
+sets it when the background is a picture.
+
+The script needs `python-pptx`, and `node` for every chart but `rankedTable` (`charts.js` computes the
+geometry). Exit 0 prints one JSON line (the chart, the box, the size used). Exit 2 means nothing is written,
+with the reason and the remedy. A slide never gets an ellipsis, smaller text or a missing label.
+
+## Before you hand over
+
+1. `--check` passes.
+2. Render the page at desktop and phone width, and render the slide with the deck renderer the machine
+   has (an export from PowerPoint, or a command-line renderer). Look at each image: the code checks the
+   numbers and the fit, not the look. When the machine has no deck renderer, say in the hand-over that
+   nobody looked at the slide.
+3. The heading of the page and the title of the slide state the same claim, and every number in the claim
+   is in the chart.
+4. Read the chart as a person who has not seen the data. If the claim is not the first thing that person
+   sees, change the form, the order or the highlight.
+
+## Direct calls from code
+
+Each chart type is also a named export of `charts.js`: a pure function that takes one options object and
+returns the SVG string. Use a direct call when the page needs a function as an option (`fmtY`, `fmtX`,
+a `line.fn` for `scatter`). Everything else is the same as the spec.
+
+```js
+import { lineChart } from './charts.js';
+el.innerHTML = lineChart({ labels, series, target: 150, fmtY: v => '$' + v + 'k' });
+```
+
+Common options:
 
 | Option | Meaning |
 |---|---|
@@ -75,19 +213,19 @@ options:
 | `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
 | `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
 | `groupedBars` | `categories:[...]`, `series:[{name,values:[...]}]` | two or three series side by side per category (this year against last year) |
-| `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]` | how a total and its parts move over time |
+| `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]`, `totalLabels?` | how a total and its parts move over time |
 | `slope` | `rows:[{label,a,b}]`, `aLabel`, `bLabel` | each item at two moments; rises, falls and flat lines take different colours |
 | `bullet` | `rows:[{label,value,target}]`, `overColor?` | a value against its target or budget, one row per item |
 | `histogram` | `values:[...]` with `bins: n`, or `bins:[{from,to,count}]`, `mark?:{value,text}` | how one measure is spread |
 | `boxPlot` | `groups:[{label,values:[...]}]` or `[{label,min,q1,median,q3,max}]` | spread per group: range, middle half, median |
-| `calendar` | `days:[{date:'YYYY-MM-DD',value}]` | one cell per day, weeks as columns: habits, streaks, seasons |
+| `calendar` | `days:[{date:'YYYY-MM-DD',value}]`, `cell?` | one cell per day, weeks as columns: habits, streaks, seasons |
 | `treemap` | `items:[{label,value}]` | many parts of one total, area = value |
 | `funnel` | `stages:[{label,value}]` | how many remain at each stage, with the share of the first stage |
 | `sankey` | `flows:[{from,to,value}]` | two columns: where an amount comes from and where it goes |
 | `gauge` | `value`, `max`, `target?`, `caption?` | one value on its way to a limit or a goal |
 | `pareto` | `data:[{label,value}]` | ranked bars with the running share and an 80% rule |
 | `wordCloud` | `words:[{text,value}]`, `minSize?`, `maxSize?` | which words or names carry a body of text; no overlap, words without room are counted in `data-omitted` |
-| `rankedTable` | `rows:[{label,value,cols?,note?,flag?}]`, `columns:[...]`, `valueLabel`, `total?`, `change?`, `format?`, `highlight?` | items ranked on one measure, with the exact values and the change beside each bar; one spec file also draws the slide (see below) |
+| `rankedTable` | `rows:[{label,value,cols?,note?,flag?}]`, `columns:[...]`, `valueLabel`, `total?`, `change?`, `format?`, `highlight?` | items ranked on one measure, with the exact values and the change beside each bar |
 
 `lineChart` takes `area: true` to fill under each series (volume over time). `waterfall` takes `zoom: true` to start the axis
 below the lowest level instead of at zero, so small steps between large totals stay visible. `hbarChart`, `donut`, `heatmap`
@@ -96,123 +234,8 @@ builder's domain (a negative bar in `hbarChart`, a zero slice in `donut`, an unk
 `RangeError`. Extra theme hooks: `--chart-muted` (muted bars and late slices) and `--chart-paper` (text on a
 dark heatmap cell).
 
-Helpers are also exported: `niceTicks(lo,hi,n)` (round axis steps), `svg(w,h,body,label)`
-(the wrapper), `esc`, `fin`, and `palette(i)`.
-
-## Ranked bars with a table: one spec for the page and the deck
-
-`rankedTable` draws one row per item: the label, a bar for the measure the items are ranked by, then that
-value and up to three more numbers as columns. The spec is plain JSON. `charts.js` draws it on a page and
-`deck/ranked_table.py` draws the same file as native, editable PowerPoint shapes.
-
-### When this form is right
-
-| The reader's question | Form |
-|---|---|
-| Which item is highest, and what are its exact numbers? 3 to 12 items, 1 to 3 more numbers per item | `rankedTable` |
-| Did each item rise or fall, and the direction is the message | `slope` or `dumbbell` |
-| How does a value move across four or more ordered periods | `lineChart` |
-| How large is each part of one total | `stackedBars` or `donut` |
-| More than 12 items, or more than 3 more numbers per item | a table |
-
-### The spec
-
-```json
-{
-  "claim": "Nordics spends the most on travel per revenue dollar, and its first-half rate fell",
-  "title": "Travel cost per revenue dollar", "unit": "travel cost / revenue", "source": "Sample ledger, FY 2025",
-  "valueLabel": "FY 2025", "columns": ["H1 2025", "H1 2026"],
-  "change": { "from": 0, "to": 1, "label": "Change (pp)" },
-  "format": { "decimals": 2, "suffix": "%" },
-  "rows": [
-    { "label": "Nordics", "value": 2.40, "cols": [2.52, 2.11] },
-    { "label": "Benelux", "value": 0.95, "cols": [1.31, 1.74], "flag": "H1 2025 is above the full year. Check the H2 2025 booking." },
-    { "label": "Shared services", "value": null, "note": "$1.2M of cost, no revenue" }
-  ],
-  "total": { "label": "All regions", "value": 1.52, "cols": [1.60, 1.46] }
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `rows[].value` | the number the bar shows and the rows are ranked by; `null` for a row that has no value |
-| `rows[].cols` | one number per name in `columns`, 3 at most; `null` shows `n.a.` |
-| `rows[].note` | required when `value` is `null`: why the row has no value. It takes the place of the bar |
-| `rows[].flag` | a caution about the row. The label takes a `*` and the text is written under the table |
-| `valueLabel`, `columns` | the column headers |
-| `change` | adds a column: `cols[to]` less `cols[from]`, with ▲ or ▼. `label`, `decimals` and `suffix` are optional |
-| `total` | the last row, under a rule, with a neutral bar and a reference line through the rows above |
-| `format` | `{ decimals, prefix, suffix }` for every value. On a page, `fmtY` (a function) can replace it |
-| `highlight` | row labels that keep the bar colour; the other bars are muted |
-| `sort` | `false` keeps the given order. The default ranks from the largest value |
-| `claim` | the finding as one sentence. It is the page heading and the slide title; the chart itself does not draw it |
-| `title`, `unit`, `source` | the short name of the measure, its unit, the source of the numbers |
-
-### Rules for the agent
-
-The code sorts, formats, computes the change and refuses a bad spec. These decisions stay with you:
-
-1. The bar is the one measure the reader ranks the items by. Use a full period that is the same for every item.
-2. Columns hold the exact numbers that support the claim. Periods that are not a sequence (a full year and
-   two first halves) go in columns. Do not draw them as one line.
-3. The change is the later column less the earlier column. Name its unit in the header: "pp" for a change
-   between two percentages. Give the values at the precision the chart shows, so a reader who subtracts
-   the two columns gets the change shown.
-4. An item without a denominator or without data is a note row (`value: null` with a `note`). Do not
-   draw it as a zero bar. Do not remove it when its amount is part of the total.
-5. When the total includes an amount that the rows above cannot show, say so in the claim or in a `flag`.
-6. Put a `flag` on a row whose numbers do not agree with each other (a half above its full year, a change
-   of sign). Do not present the change of that row as a finding before someone checks it.
-7. The claim goes in the heading: the page heading and the slide title are the `claim`, a full sentence
-   with the finding. `title` in the spec is only the short name of the measure.
-8. Use `highlight` only for the rows the claim names.
-9. Use only numbers from the source, and name the source.
-10. Write one spec file and give it to both renderers. Do not type the numbers a second time.
-
-### On a page
-
-```js
-import { rankedTable } from './charts.js';
-const spec = await (await fetch('./spec.json')).json();
-heading.textContent = spec.claim;                       // the page heading is the claim
-const draw = () => { el.innerHTML = rankedTable({ ...spec, width: Math.max(280, el.clientWidth) }); };
-draw(); new ResizeObserver(draw).observe(el);
-```
-
-Pass the width of the container. Below 460px, or when the bars would get less than 80px, each label
-moves to its own line above its bar and the reference line is left out. A label wider than its column is
-cut with an ellipsis; the tooltip of the row has the full label and every value.
-
-### On a slide
-
-```sh
-python3 deck/ranked_table.py spec.json --check                       # the spec only
-python3 deck/ranked_table.py spec.json --out chart.pptx              # a new 16:9 deck: one slide, the claim as its title
-python3 deck/ranked_table.py --list deck.pptx --slide 3              # shapes and boxes of a slide
-python3 deck/ranked_table.py spec.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
-python3 deck/ranked_table.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 --out deck2.pptx
-```
-
-`--into` draws the chart only (no title, no source): write the claim into the slide's own title and the
-source into its footnote. `--replace` gives the chart the box of a named shape and removes that shape; `--box` is
-x, y, width and height in points. The chart is one group of native shapes: bars, text boxes and rules that
-a person can edit in PowerPoint. Bar colour (accent 1), ink and font come from the deck theme, so the chart
-takes the look of the template. On a dark slide the ink is light; the script reads the background from the
-deck, and `--on dark` sets it when the background is a picture. `--accent RRGGBB` forces a bar colour.
-
-The script needs `python-pptx`. Exit 0 prints one JSON line (rows in draw order, the box, the row height).
-Exit 2 means the chart is not written, with the reason: a label or a note that does not fit, more rows than
-the box can hold at 20pt per row, bars that would get less than 100pt, or a bad spec. A slide never gets an
-ellipsis or smaller text: shorten the label, reduce the rows, or give a larger box.
-
-### Before you hand over
-
-1. `--check` passes and the rows print in the order you expect.
-2. Render the page at desktop and phone width, and render the slide with the deck renderer the machine
-   has (PowerPoint, or a command-line renderer). Look at each image: the code checks the numbers and the
-   fit, not the look.
-3. The heading of the page and the title of the slide state the same claim, and every number in the claim
-   is in the chart.
+Helpers are also exported: `chartTypes` (the chart types and the fields each takes), `niceTicks(lo,hi,n)`
+(round axis steps), `svg(w,h,body,label)` (the wrapper), `esc`, `fin`, and `palette(i)`.
 
 ## Title, units, source and callouts
 
@@ -315,8 +338,7 @@ Per-series `color` options override the palette when you pass them.
 
 ## Verify
 
-Run `npm test` (node:test, no dependencies) and `python3 -m unittest deck/test_ranked_table.py` (needs `python-pptx`;
-one test compares the rows and numbers of the slide with those of the page). Open `demo.html` in a browser (or
-render it headless) to see every builder with sample data in both light and
-dark mode, plus one chart with title, unit, source and callouts. That page is
-the reference for the option shapes and the theme variables.
+Run `npm test` (node:test, no dependencies) and `python3 -m unittest discover -s deck` (needs `python-pptx`;
+the tests draw every file in `examples/` as a slide and compare its texts with those of the page). Open
+`demo.html` in a browser (or render it headless) to see every builder with sample data in both light and
+dark mode, and every spec file of `examples/` drawn through `chart(spec)`.

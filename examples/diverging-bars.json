@@ -1,0 +1,14 @@
+{
+ "chart": "divergingBars",
+ "claim": "Orders grew in three of five products; product D lost the most",
+ "title": "Change in orders",
+ "unit": "orders, this quarter less the last",
+ "source": "Sample data",
+ "data": [
+  { "label": "A", "value": 420 },
+  { "label": "B", "value": 180 },
+  { "label": "C", "value": -90 },
+  { "label": "D", "value": -260 },
+  { "label": "E", "value": 60 }
+ ]
+}

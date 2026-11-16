@@ -1,0 +1,7 @@
+{
+ "chart": "sparkline",
+ "claim": "Weekly spend rose from 12 to 19 in seven weeks",
+ "values": [12, 14, 13, 17, 16, 21, 19],
+ "width": 160,
+ "height": 36
+}
