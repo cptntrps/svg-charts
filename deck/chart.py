@@ -11,7 +11,7 @@
       the chart inside a box (x,y,w,h in points)
   python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim of the slide"
   python3 deck/chart.py a.json b.json --into deck.pptx --slide 3 --replace "Content Placeholder 2" --out deck2.pptx
-      two or three charts side by side in equal columns, each with its own claim above it
+      two or three charts side by side in equal columns, each under its numbered takeaway (the claim of its spec)
   python3 deck/chart.py --list deck.pptx --slide 3
       the shapes on a slide with their boxes, to choose --box or --replace
   --subtitle "..." says what the numbers are (the measure, the unit, the period), in one or two lines under the
@@ -54,14 +54,15 @@ INK_LEVEL = {'ink': 0.0, 'axis-text': 0.35, 'total': 0.5, 'muted': 0.7, 'grid': 
 VAR = re.compile(r'var\(\s*--chart-([\w-]+)\s*(?:,\s*([^)]+?)\s*)?\)')
 
 
-def render(spec_path, width, height, frame='full'):
+def render(spec_path, width, height, frame='full', stack=False):
     """The page chart of the spec at this size, from charts.js in strict mode.
     frame: 'full' keeps the title, unit and source lines, 'source' the source only, 'none' leaves all out."""
     node = shutil.which('node')
     if not node:
         raise SpecError('node is not installed: charts.js computes the geometry of every chart but rankedTable')
     cmd = [node, os.path.join(HERE, 'render.mjs'), spec_path, '--width', str(int(width)), '--height', str(int(height))]
-    p = subprocess.run(cmd + {'full': [], 'source': ['--bare-title'], 'none': ['--bare']}[frame], capture_output=True, text=True, encoding='utf-8')
+    cmd += {'full': [], 'source': ['--bare-title'], 'none': ['--bare']}[frame] + (['--stack-title'] if stack else [])
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
     if p.returncode == 2:
         raise SpecError(p.stderr.strip())
     if p.returncode:
@@ -425,42 +426,46 @@ def load(path):
     return spec
 
 
-def fit(path, spec, box, frame):
+def fit(path, spec, box, frame, stack=False):
     """Check one chart against a box without a deck. Returns the receipt fields."""
     if spec['chart'] == 'rankedTable':
         rows, heads = rt.model(spec)
         band = (22 if frame == 'full' and (spec.get('title') or spec.get('unit')) else 0) + (16 if frame != 'none' and spec.get('source') else 0)
         rt.layout(spec, [box[0], box[1], box[2], box[3] - band])
         return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'rows': [r['label'] for r in rows], 'columns': heads}
-    d = render(path, box[2], box[3], frame)
+    d = render(path, box[2], box[3], frame, stack)
     return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'used_pt': [d['width'], d['height']]}
 
 
-def place(slide, path, spec, box, frame, palette, dark, background):
+def place(slide, path, spec, box, frame, palette, dark, background, stack=False):
     """Draw one chart into a box of the slide. Returns the receipt fields."""
     out = {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box]}
     if spec['chart'] == 'rankedTable':
         g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame={'full': True, 'source': 'source', 'none': False}[frame])
         out.update(used_height_pt=round(g['height'], 1), rows=[r['label'] for r in g['rows']])
     else:
-        d = render(path, box[2], box[3], frame)
+        d = render(path, box[2], box[3], frame, stack)
         canvas = draw_svg(slide, d, box, palette, dark, background)
         out.update(used_pt=[d['width'], d['height']], shapes=canvas.count)
     return out
 
 
+BADGE = 18                  # diameter of the number badge of a takeaway
+
+
 def side_by_side(specs, box):
-    """Two or three charts in equal columns of the box. Each column has the claim of its chart above the chart.
-    Returns per chart (claim lines, claim box, chart box)."""
+    """Two or three charts in equal columns of the box. Each column has the takeaway of its chart (the `claim` of
+    the spec) above the chart, with a number badge so that nobody reads it as the title of the chart: the title of a
+    chart says what the chart shows. Returns per chart (takeaway lines, takeaway box, chart box)."""
     n = len(specs)
     w = (box[2] - GUTTER * (n - 1)) / n
     heads = []
     for path, spec in specs:
         if not spec.get('claim'):
-            raise SpecError(f'{path}: each chart on a shared slide has its claim above it: add "claim" to the spec')
+            raise SpecError(f'{path}: each chart on a shared slide has its takeaway above it: add "claim" to the spec')
         if spec['chart'] == 'sparkline':
             raise SpecError(f'{path}: a sparkline is not a chart of its own: use --into with a small --box beside the number it supports')
-        lines = rt.wrap(spec['claim'], w, HEAD_FS, 0.56)
+        lines = rt.wrap(spec['claim'], w - BADGE - 8, HEAD_FS, 0.56)
         if len(lines) > 3:
             raise SpecError(f'{path}: the claim needs {len(lines)} lines at {HEAD_FS}pt in a {w:.0f}pt column, it has 3: shorten it')
         heads.append(lines)
@@ -501,7 +506,7 @@ def main(argv=None):
             box = rt.furnish_box(box, a.subtitle if a.box else None, a.takeaway)[0]
             if many:
                 cols = side_by_side(specs, box)
-                print(json.dumps({'ok': True, 'charts': [fit(p, s, c[2], 'none' if a.bare else 'full') for (p, s), c in zip(specs, cols)]}))
+                print(json.dumps({'ok': True, 'charts': [fit(p, s, c[2], 'none' if a.bare else 'full', True) for (p, s), c in zip(specs, cols)]}))
             else:
                 print(json.dumps(dict(ok=True, **fit(path, spec, box, 'none' if a.bare or not a.box else 'source' if a.subtitle else 'full'))))
             return 0
@@ -522,9 +527,30 @@ def main(argv=None):
             from pptx.dml.color import RGBColor
             from pptx.util import Pt
             charts = []
-            for (p, s), (lines, hbox, cbox) in zip(specs, side_by_side(specs, box)):
-                tb = slide.shapes.add_textbox(Pt(hbox[0]), Pt(hbox[1]), Pt(hbox[2]), Pt(hbox[3]))
-                tb.name = f"Claim {s['chart']}"
+            from pptx.enum.dml import MSO_THEME_COLOR
+            from pptx.enum.shapes import MSO_SHAPE
+            from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+            for n, ((p, s), (lines, hbox, cbox)) in enumerate(zip(specs, side_by_side(specs, box)), 1):
+                badge = slide.shapes.add_shape(MSO_SHAPE.OVAL, Pt(hbox[0]), Pt(hbox[1]), Pt(BADGE), Pt(BADGE))
+                badge.name = f'Takeaway badge {n}'
+                badge.shadow.inherit = False
+                badge.line.fill.background()
+                badge.fill.solid()
+                if palette:
+                    badge.fill.fore_color.rgb = RGBColor.from_string(palette[0])
+                else:
+                    badge.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
+                bf = badge.text_frame
+                bf.margin_left = bf.margin_right = bf.margin_top = bf.margin_bottom = 0
+                bf.vertical_anchor = MSO_ANCHOR.MIDDLE
+                bf.paragraphs[0].alignment = PP_ALIGN.CENTER
+                num = bf.paragraphs[0].add_run()
+                num.text = str(n)
+                num.font.size = Pt(10)
+                num.font.bold = True
+                num.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                tb = slide.shapes.add_textbox(Pt(hbox[0] + BADGE + 8), Pt(hbox[1]), Pt(hbox[2] - BADGE - 8), Pt(hbox[3]))
+                tb.name = f"Takeaway {n} {s['chart']}"
                 tf = tb.text_frame
                 tf.word_wrap = True
                 tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
@@ -534,7 +560,8 @@ def main(argv=None):
                 run.font.bold = True
                 if dark:
                     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                charts.append(place(slide, p, s, cbox, 'none' if a.bare else 'full', palette, dark, background))
+                # Charts side by side have the unit under the title, so that their plots start at one height.
+                charts.append(place(slide, p, s, cbox, 'none' if a.bare else 'full', palette, dark, background, stack=True))
             receipt['charts'] = charts
         else:
             # One chart: a new deck has the subtitle and the source of the spec on the slide. In an existing slide the

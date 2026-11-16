@@ -622,3 +622,10 @@ test('legend positions keep the height of a chart whose height follows its rows'
   assert.ok(Math.abs(h(top) - h(bottom)) <= 4, 'bottom adds the room the top legend took');
   assert.ok(h(right) < h(top), 'right takes width, not height');
 });
+
+test('chart: the title says what the chart shows, the claim has the finding', () => {
+  const spec = examples.find(([, s]) => s.chart === 'barChart')[1];
+  assert.throws(() => charts.chart({ ...spec, title: spec.claim }), /"title" repeats the claim/);
+  assert.throws(() => charts.chart({ ...spec, title: 'Orders by channel rose in every region and Search now brings the most of them' }), /the limit is 60/);
+  for (const [file, s] of examples) if (s.title) assert.ok(s.title.length <= 60 && s.title !== s.claim, file);
+});

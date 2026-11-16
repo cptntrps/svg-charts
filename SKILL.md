@@ -74,7 +74,8 @@ there.
 |---|---|
 | `chart` | the chart type: a builder name from the table above |
 | `claim` | the finding as one sentence. It is the page heading and the slide title; the chart does not draw it |
-| `title`, `unit`, `source` | the short name of the measure, its unit and period, the source of the numbers |
+| `title` | what the chart shows: the measure, by what, when ("Orders by channel"). It describes; it does not comment. 60 characters at most, and never the claim again (the code refuses both) |
+| `unit`, `source` | the unit and the period of the values, the source of the numbers |
 | `format` | `{ decimals, prefix, suffix }` for the values: `{ "decimals": 1, "suffix": "%" }`, `{ "prefix": "$", "suffix": "k" }` |
 | `formatX` | the same for the x axis of `scatter` and `histogram` |
 | `label` | the accessible name; the claim when not given |
@@ -95,7 +96,8 @@ The code refuses a spec it cannot draw honestly, with a message that names the r
 These hold for every chart. The rules of each chart type are in `references/chart-rules.md`.
 
 1. The claim goes in the heading: the page heading and the slide title are the `claim`, a full sentence
-   with the finding. `title` in the spec is only the short name of the measure.
+   with the finding. The `title` of the chart describes the chart: what is measured, by what, when. A reader
+   who sees only the chart title must know what the marks are, and must not find an opinion in it.
 2. Every number in the claim is in the chart, at the same precision. When the chart type cannot show a
    number (a part of a stacked area), write the claim without it or choose a form that shows it.
 3. Use only numbers from the source, and name the source. `unit` names the unit and the period.
@@ -164,11 +166,12 @@ with the reason and the remedy. A slide never gets an ellipsis, smaller text or 
 
 ### Title, subtitle and takeaway
 
-A slide has three lines of text around its charts, and each has one job:
+A slide has four kinds of text around its charts, and each has one job:
 
 | Line | Job | Example |
 |---|---|---|
 | Title | the claim: the finding as one sentence | "Support tickets fell by a third after the March release" |
+| Chart title | what the chart shows; it describes | "Support tickets · tickets per month" |
 | Subtitle | what the numbers are: the measure, the unit, the period, the scope. It is not a comment on the chart | "Number of support tickets per month, all regions, 2026" |
 | Takeaway | the comment: what the reader must conclude or do. It does not say the claim again | "Move the support budget of the third quarter to the release team" |
 
@@ -195,8 +198,10 @@ python3 deck/chart.py a.json b.json c.json --into deck.pptx --slide 3 --replace 
 python3 deck/chart.py a.json b.json c.json --check --title "The claim of the slide"
 ```
 
-Give two or three spec files. The script divides the box into equal columns with 24pt between them and
-writes the `claim` of each spec above its chart (13pt, 3 lines at most). `--out` alone needs `--title`: the
+Give two or three spec files. The script divides the box into equal columns with 24pt between them. Each
+column has, from the top: the takeaway of the chart with a number badge (the `claim` of its spec, 13pt,
+3 lines at most), the title of the chart with its unit on the line under it, the legend, the plot, the source.
+The badge tells the reader that the line is a comment: the title of a chart always says what the chart shows. `--out` alone needs `--title`: the
 claim of the whole slide. With `--into`, write that claim into the slide's own title. When one chart does
 not fit its column, nothing is written. Four or more charts are refused.
 
