@@ -59,8 +59,10 @@ const axisText = (x, y, anchor, t, extra = '') => {
 const TOP_BAND = 22, BOTTOM_BAND = 16;
 // Height of the band above the plot: 22px for "Title · unit" on one line, 38px when the line is wider than the
 // chart (a narrow page, two or three charts on one slide): the unit then stands on its own line under the title.
+let STACK_TITLE = false;      // chart(spec, { stackTitle: true }): the unit always stands under the title
 function topBand(title, unit, W) {
   if (title == null && unit == null) return 0;
+  if (STACK_TITLE && title != null && unit != null) return TOP_BAND + 16;
   return title != null && unit != null && W != null && textW(title + ' · ' + unit, 14) * 0.86 > W - 8 ? TOP_BAND + 16 : TOP_BAND;
 }
 function frame({ title, unit, source, H, W }) {
@@ -1151,6 +1153,7 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
 // strict (a slide, a printed report): nothing may be cut or left out; an empty chart, a shortened label, labels that
 // overlap or a word without room throw a RangeError that names the remedy. bare leaves out title, unit and source;
 // bare: 'title' leaves out title and unit and keeps the source (the page or the slide has its own subtitle).
+// stackTitle puts the unit on its own line under the title at every width, so charts side by side start level.
 // =====================================================================================
 const COMMON = ['chart', 'claim', 'title', 'unit', 'source', 'label', 'width', 'height', 'format', 'formatX'];
 const rowsFit = (opt, min, max) => ({ opt, min, max });
@@ -1212,7 +1215,11 @@ const SLOTS = {
 };
 const svgHeight = out => +out.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
 
-export function chart(spec, { width, height, strict = false, bare = false } = {}) {
+export function chart(spec, { width, height, strict = false, bare = false, stackTitle = false } = {}) {
+  STACK_TITLE = stackTitle;
+  try { return drawSpec(spec, { width, height, strict, bare }); } finally { STACK_TITLE = false; }
+}
+function drawSpec(spec, { width, height, strict, bare }) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new RangeError('the spec must be an object');
   const type = chartTypes[spec.chart];
   if (!type) throw new RangeError(`"chart" must be one of: ${Object.keys(chartTypes).join(', ')}`);
@@ -1221,6 +1228,9 @@ export function chart(spec, { width, height, strict = false, bare = false } = {}
   if (unknown.length) throw new RangeError(`${what} does not take "${unknown.join('", "')}". It takes: ${type.keys.join(', ')}, and ${COMMON.join(', ')}`);
   if (spec.format && type.noFormat) throw new RangeError(`${type.noFormat}: remove "format"`);
   if (spec.formatX && !type.fmtX) throw new RangeError(`${what} has one value axis: remove "formatX"`);
+  // The title of a chart says what the chart shows (the measure, by what, when). The finding goes in the claim.
+  if (spec.title != null && spec.claim != null && String(spec.title).trim() === String(spec.claim).trim()) throw new RangeError(`${what}: "title" repeats the claim. The title says what the chart shows ("Orders by channel"); the claim has the finding`);
+  if (spec.title != null && String(spec.title).length > 60) throw new RangeError(`${what}: "title" has ${String(spec.title).length} characters, the limit is 60. The title names what the chart shows; a sentence with the finding goes in "claim"`);
   const limit = LIMITS[what]?.(spec);
   if (limit) throw new RangeError(`${what}: ${limit}`);
   const o = {};
