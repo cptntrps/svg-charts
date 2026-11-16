@@ -46,7 +46,9 @@ Spec: `data: [{ label, value, series? }]`, `highlight?: [row position]`, `diverg
 3. Use `highlight` for the rows the claim names, and for no other row.
 4. Values are zero or more. For a signed change per category set `diverging: true`: bars then go left and
    right of a zero line. Say in `unit` what is subtracted from what.
-5. Use `rankedTable` when the reader also needs one to three more numbers per row.
+5. Use `rankedTable` when the reader also needs one to three more numbers per row, or when a row has no
+   value (a period that is not complete, a missing denominator). `rankedTable` shows that row with a note in
+   place of the bar; its `columns` can be empty.
 
 ## groupedBars
 
@@ -64,7 +66,8 @@ Spec: `categories: [...]`, `series: [{ name, values: [one per category] }]`, `le
 ## rankedTable
 
 Use when the reader asks "which item is highest, and what are its exact numbers?": 3 to 12 items, the bar
-for the measure the items are ranked by, and one to three more numbers per item.
+for the measure the items are ranked by, and zero to three more numbers per item. Use it also for a plain
+ranking in which one item has no value: that item becomes a note row.
 Example: `examples/ranked-table.json`.
 
 | The reader's question | Form |
@@ -210,6 +213,9 @@ Spec: `items: [{ label, value, total? }]`, `zoom?`, `annotations?`, `legend?`, `
 1. The first and the last item are totals (`total: true`). The steps between them are signed changes.
 2. The steps must reach the last total. The code refuses a spec where they do not: find the missing step,
    do not add a step named "Other" to close the gap unless the source has it.
+   When the source itself does not reconcile, do not draw a bridge. Show the movements with `hbarChart` and
+   `diverging: true`, state the gap in the claim, and name the totals in the source line. The owner of the
+   numbers must resolve the gap.
 3. Eight bars at most. Labels of one or two words.
 4. Set `zoom: true` when the steps are small against the totals. The axis then starts above zero and its
    lowest tick says where. Do not use `zoom` when the size of a total is the message.
@@ -232,9 +238,11 @@ Spec: `columns: [{ label, parts: { key: value } }]`, `keys: [the stack order]`, 
 
 Use for how a total and its parts move over time. Example: `examples/stacked-area.json`.
 
-Spec: `labels: [the periods in order]`, `series: [{ name, values: [one per label] }]`, `legend?` (on), `colors?`.
+Spec: `labels: [the periods in order]`, `series: [{ name, values: [one per label] }]`, `totalLabels?`, `legend?` (on), `colors?`.
 
-1. The top edge is the total. State the total in the claim when it is the message.
+1. The top edge is the total. When the claim names the total, set `totalLabels: true`: the chart then writes
+   the total above the first and the last period. A part of the total has no label: when the claim needs the
+   exact value of a part, use `groupedBars` or a table.
 2. The first series stands on the baseline. Put the part the claim names there, or else the largest and
    most stable part. The reader cannot compare the parts above it exactly.
 3. Five series at most. Values are zero or more.

@@ -35,7 +35,7 @@ there.
 | The reader's question | Chart |
 |---|---|
 | How large is each of a few categories? | `barChart` (short names), `hbarChart` (long names, ranking, narrow page) |
-| Which item is highest, and what are its exact numbers? | `rankedTable` |
+| Which item is highest, and what are its exact numbers? Or one item of the ranking has no value | `rankedTable` |
 | How do two to four series compare inside each category? | `groupedBars` |
 | Do a few items make most of the total? | `pareto` |
 | Is each value above or below its own target? | `bullet`; one value toward a limit: `gauge` |
@@ -96,14 +96,19 @@ These hold for every chart. The rules of each chart type are in `references/char
 
 1. The claim goes in the heading: the page heading and the slide title are the `claim`, a full sentence
    with the finding. `title` in the spec is only the short name of the measure.
-2. Every number in the claim is in the chart, at the same precision.
+2. Every number in the claim is in the chart, at the same precision. When the chart type cannot show a
+   number (a part of a stacked area), write the claim without it or choose a form that shows it.
 3. Use only numbers from the source, and name the source. `unit` names the unit and the period.
+   A number you compute from the source (a sum, a share, a difference) is permitted: compute it with code,
+   and make sure the reader can compute it again from the numbers the chart shows.
 4. Write one spec file and give it to both renderers. Do not type the numbers a second time.
 5. Colour says which thing a mark is. Give one series one colour. Do not give each bar its own colour.
    Use `highlight` or `colors` only for the items the claim names. One name keeps one colour across the
    charts of a report: pass the same `colors` object to each spec.
 6. A value that does not exist is not zero. Leave it out or mark it the way the chart type gives
-   (`null`, a note row), and say that it is missing.
+   (`null`, a note row), and say that it is missing. Missing data limits the claim: write "reported spend",
+   not "spend". When the numbers of the source do not agree with each other, that is the claim: state it,
+   draw what the source gives, and do not repair the numbers.
 7. Do not draw more than the reader can tell apart. Join small items as "Other" and put it last.
 8. One chart answers one question. For two measures of different units, draw two charts.
 9. When the code refuses the spec, change the content (shorter labels, fewer items, a different form).
@@ -160,8 +165,9 @@ with the reason and the remedy. A slide never gets an ellipsis, smaller text or 
 
 1. `--check` passes.
 2. Render the page at desktop and phone width, and render the slide with the deck renderer the machine
-   has (PowerPoint, or a command-line renderer). Look at each image: the code checks the numbers and the
-   fit, not the look.
+   has (an export from PowerPoint, or a command-line renderer). Look at each image: the code checks the
+   numbers and the fit, not the look. When the machine has no deck renderer, say in the hand-over that
+   nobody looked at the slide.
 3. The heading of the page and the title of the slide state the same claim, and every number in the claim
    is in the chart.
 4. Read the chart as a person who has not seen the data. If the claim is not the first thing that person
@@ -207,7 +213,7 @@ Common options:
 | `heatmap` | `rows:[...]`, `cols:[...]`, `cells:[{row,col,value}]`, `color?`, `cellLabels?` | a value per row and column (weekday by week, category by month); height follows the rows |
 | `sparkline` | `values:[...]`, `width?`, `height?`, `color?` | the shape of a short series next to a number; no axes |
 | `groupedBars` | `categories:[...]`, `series:[{name,values:[...]}]` | two or three series side by side per category (this year against last year) |
-| `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]` | how a total and its parts move over time |
+| `stackedArea` | `labels:[...]`, `series:[{name,values:[...]}]`, `totalLabels?` | how a total and its parts move over time |
 | `slope` | `rows:[{label,a,b}]`, `aLabel`, `bLabel` | each item at two moments; rises, falls and flat lines take different colours |
 | `bullet` | `rows:[{label,value,target}]`, `overColor?` | a value against its target or budget, one row per item |
 | `histogram` | `values:[...]` with `bins: n`, or `bins:[{from,to,count}]`, `mark?:{value,text}` | how one measure is spread |

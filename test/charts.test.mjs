@@ -567,3 +567,9 @@ test('donut: on a wide chart the values stay near their labels', () => {
   const label = +out.match(/<text x="([\d.]+)"[^>]*>Produce</)[1], value = +out.match(/<text x="([\d.]+)"[^>]*text-anchor="end"[^>]*>[^<]*33%</)?.[1];
   assert.ok(value - label <= 380, `value column ${value} is within 380px of the labels at ${label}`);
 });
+
+test('stackedArea: totalLabels writes the first and the last total', () => {
+  const spec = examples.find(([, s]) => s.chart === 'stackedArea')[1], out = charts.chart(spec, { width: 864, height: 360 });
+  assert.ok(out.includes('>$92k</text>') && out.includes('>$102k</text>'), 'the totals the claim names are in the chart');
+  assert.ok(!charts.chart({ ...spec, totalLabels: false }).includes('>$92k</text>'));
+});

@@ -5,15 +5,16 @@
  "unit": "$ thousand per month",
  "source": "Sample data",
  "format": { "decimals": 0, "prefix": "$", "suffix": "k" },
+ "totalLabels": true,
  "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
  "series": [
   {
-   "name": "Rent",
-   "values": [58, 58, 58, 60, 60, 60]
-  },
-  {
    "name": "Food",
    "values": [22, 25, 21, 27, 24, 29]
+  },
+  {
+   "name": "Rent",
+   "values": [58, 58, 58, 60, 60, 60]
   },
   {
    "name": "Other",

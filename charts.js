@@ -687,8 +687,9 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
 
 // ---------- stacked area (how a total and its parts move over time) ----------
 // labels: [x, ...]; series: [{ name, color?, values: [number per label] }], drawn bottom to top in the order given.
+// `totalLabels: true` writes the total above the first and the last period, for a claim that names them.
 export function stackedArea({ labels = [], series = [], label, width = 600, height = 280, fmtY = num,
-  title, unit, source, legend = true, colors } = {}) {
+  title, unit, source, legend = true, colors, totalLabels = false } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked area', W = width;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const lg = legendRows(legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top);
@@ -709,6 +710,9 @@ export function stackedArea({ labels = [], series = [], label, width = 600, heig
   });
   g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
     ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
+  if (totalLabels) [0, labels.length - 1].forEach(i => {
+    g += axisText(X(i), Y(totals[i]) - 6, i ? 'end' : 'start', fmtY(totals[i]), `fill="${INK}" font-weight="700" font-size="11"`);
+  });
   return svg(W, height, f.deco + lg.svg + g, lab);
 }
 
@@ -1127,7 +1131,7 @@ export const chartTypes = {
   heatmap: { fn: heatmap, keys: ['rows', 'cols', 'cells', 'cellHeight', 'color', 'cellLabels'], rows: rowsFit('cellHeight', 18, 44) },
   sparkline: { fn: sparkline, keys: ['values', 'color'], height: true, noFrame: true },
   groupedBars: { fn: groupedBars, keys: ['categories', 'series', 'legend', 'colors', 'valueLabels'], height: true },
-  stackedArea: { fn: stackedArea, keys: ['labels', 'series', 'legend', 'colors'], height: true },
+  stackedArea: { fn: stackedArea, keys: ['labels', 'series', 'legend', 'colors', 'totalLabels'], height: true },
   slope: { fn: slope, keys: ['rows', 'aLabel', 'bLabel', 'colors'], height: true },
   bullet: { fn: bullet, keys: ['rows', 'rowHeight', 'colors', 'overColor'], rows: rowsFit('rowHeight', 34, 56) },
   histogram: { fn: histogram, keys: ['values', 'bins', 'color', 'mark'], height: true, fmtX: true },
