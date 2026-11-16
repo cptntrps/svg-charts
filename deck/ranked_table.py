@@ -203,7 +203,7 @@ def background_is_dark(prs, slide):
     return is_dark(background_rgb(prs, slide))
 
 
-def draw(slide, spec, box, accent=None, dark=False, frame=False):
+def draw(slide, spec, box, accent=None, dark=False, frame=False, min_font=0):
     """Draw the chart into the slide as one group of native shapes. Returns the layout.
     frame=True also writes "title · unit" above the chart and the source under it, inside the box.
     frame='source' writes the source only (the slide has its own subtitle)."""
@@ -244,7 +244,7 @@ def draw(slide, spec, box, accent=None, dark=False, frame=False):
         for part in ([s[0], s[1:]] if s[:1] in '▲▼' and len(s) > 1 else [s]):
             run = p.add_run()
             run.text = part
-            run.font.size = Pt(size)
+            run.font.size = Pt(max(size, min_font))
             run.font.bold = bold
             ink(run.font.color, level)
         return tb
