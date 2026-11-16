@@ -377,12 +377,12 @@ def furnish_box(box, subtitle=None, takeaway=None):
     """The chart box that stays when a subtitle stands at the top of the box and a takeaway at its bottom."""
     x, y, w, h = box
     sub = wrap(subtitle, w, SUB_FS) if subtitle else []
-    take = wrap(takeaway, w - 14, SUB_FS) if takeaway else []
+    take = wrap(takeaway, w - 32, SUB_FS) if takeaway else []
     for name, lines in (('subtitle', sub), ('takeaway', take)):
         if len(lines) > 2:
             raise SpecError(f'the {name} needs {len(lines)} lines in {w:.0f}pt, it has 2: shorten it')
     top = SUB_LINE * len(sub) + TITLE_GAP if sub else 0
-    bottom = SUB_LINE * len(take) + 10 + 16 if take else 0
+    bottom = SUB_LINE * len(take) + 14 + 12 if take else 0      # the band and the room above it
     return [x, y + top, w, h - top - bottom], sub, take
 
 
@@ -399,23 +399,25 @@ def _ink(color, level, dark):
 
 
 def furnish(slide, box, subtitle=None, takeaway=None, dark=False, accent=None):
-    """Write the subtitle at the top of the box and the takeaway (an accent bar and a bold line) at its bottom.
-    Returns the box that stays for the chart."""
+    """Write the subtitle at the top of the box and the takeaway at its bottom: a light band over the width of the
+    box with an accent bar at its left and the words in bold, centred. Returns the box that stays for the chart."""
     from pptx.dml.color import RGBColor
     from pptx.enum.dml import MSO_THEME_COLOR
     from pptx.enum.shapes import MSO_SHAPE
-    from pptx.enum.text import MSO_ANCHOR
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
     from pptx.util import Pt
     chart_box, sub, take = furnish_box(box, subtitle, takeaway)
     x, y, w, h = box
 
-    def line(name, s, left, top, width, height, bold, level):
+    def line(name, s, left, top, width, height, bold, level, centred=False):
         tb = slide.shapes.add_textbox(Pt(left), Pt(top), Pt(width), Pt(height))
         tb.name = name
         tf = tb.text_frame
         tf.word_wrap = True
         tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
         tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        if centred:
+            tf.paragraphs[0].alignment = PP_ALIGN.CENTER
         run = tf.paragraphs[0].add_run()
         run.text = s
         run.font.size = Pt(SUB_FS)
@@ -424,17 +426,27 @@ def furnish(slide, box, subtitle=None, takeaway=None, dark=False, accent=None):
     if sub:
         line('Subtitle', subtitle, x, y, w, SUB_LINE * len(sub), False, 0.35)
     if take:
-        th = SUB_LINE * len(take) + 10
-        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Pt(x), Pt(y + h - th), Pt(4), Pt(th))
-        bar.name = 'Takeaway bar'
-        bar.shadow.inherit = False
-        bar.line.fill.background()
-        bar.fill.solid()
+        th = SUB_LINE * len(take) + 14
+
+        def block(name, left, width):
+            shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Pt(left), Pt(y + h - th), Pt(width), Pt(th))
+            shp.name = name
+            shp.shadow.inherit = False
+            shp.line.fill.background()
+            shp.fill.solid()
+            return shp
+        band = block('Takeaway band', x, w)
+        if dark:
+            band.fill.fore_color.rgb = RGBColor(0x2A, 0x2E, 0x33)
+        else:
+            band.fill.fore_color.theme_color = MSO_THEME_COLOR.TEXT_1
+            band.fill.fore_color.brightness = 0.93
+        bar = block('Takeaway bar', x, 4)
         if accent:
             bar.fill.fore_color.rgb = RGBColor.from_string(accent)
         else:
             bar.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
-        line('Takeaway', takeaway, x + 14, y + h - th, w - 14, th, True, 0.0)
+        line('Takeaway', takeaway, x + 16, y + h - th, w - 32, th, True, 0.0, centred=True)
     return chart_box
 
 

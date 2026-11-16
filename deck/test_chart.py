@@ -258,6 +258,10 @@ class ChartDeck(unittest.TestCase):
         self.assertGreaterEqual(takeaway.top, g.top + g.height, 'the takeaway stands under the chart')
         self.assertLessEqual(takeaway.top + takeaway.height, 500 * PT + PT)
         self.assertEqual(bar.top, takeaway.top)
+        band = next(s for s in slide.shapes if s.name == 'Takeaway band')
+        self.assertEqual((band.left, band.width), (48 * PT, 864 * PT), 'the takeaway band has the width of the chart area')
+        self.assertEqual(str(takeaway.text_frame.paragraphs[0].alignment), 'CENTER (2)', 'the takeaway is centred')
+        self.assertAlmostEqual((takeaway.left + takeaway.width / 2) / PT, 480, places=0)
 
         deck, out = self.base_deck(dark=True), self.dir / 'into.pptx'
         code, _, err = run(ex / 'gauge.json', ex / 'funnel.json', ex / 'slope.json', '--into', deck, '--replace', 'Chart area',
