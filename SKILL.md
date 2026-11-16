@@ -254,7 +254,7 @@ Common options:
 | `unit` | unit of the values, drawn after the title as `Title · unit` in `--chart-axis-text` |
 | `source` | data source, bottom-left, 10px, drawn as `Source: ...` |
 | `annotations` | callouts: `[{ index, series?, text }]` for category charts, `[{ x, y, text }]` for `scatter` |
-| `legend` | `true` draws a legend row under the title (series, groups, stacked keys, dumbbell ends; bar-type charts only when items name a `series`) |
+| `legend` | `true` or `"top"` draws the legend under the title, `"bottom"` under the plot, `"right"` beside the plot (series, groups, stacked keys, dumbbell ends; bar-type charts only when items name a `series`) |
 | `colors` | `{ name: colour }` applied by series name, item label, stacked key, group name or row label; beats the palette, not an explicit `color` |
 | `valueLabels` | `lineChart` only: `true` writes an 11px bold value above each point and skips labels that would overlap |
 
@@ -332,6 +332,16 @@ An `index` or `series` outside the data throws a `RangeError`; a callout never
 disappears silently.
 
 ## Legend, one colour per name, value labels
+
+The legend has three positions. Choose by what the reader does with it:
+
+| `legend` | Where | Use when |
+|---|---|---|
+| `true`, `"top"` | rows under the title | the default: the reader learns the colours before the data. It costs 18px of height |
+| `"right"` | one entry per line beside the plot | lines and stacks on a wide chart or a full slide. The entries stand in the order of the marks (line ends from the top, a stack from the top), so the eye goes straight across. It costs the width of the longest name; do not use it for two or three charts on one slide |
+| `"bottom"` | rows under the plot, above the source | the template or the house style asks for it. The reader finds it last, far from the title |
+
+Use one position for all charts of a deck or a report.
 
 `legend: true` lists the series (`lineChart`), groups (`scatter`), keys
 (`stackedBars`) or the two ends (`dumbbell`, hollow marker for `aLabel`, filled

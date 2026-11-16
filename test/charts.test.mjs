@@ -590,3 +590,35 @@ test('dumbbell: a narrow chart gives the label column only the width of its labe
   assert.equal(grid(charts.chart(spec, { width: 600 }))[0], 150);
   assert.ok(grid(charts.chart(spec, { width: 272 }))[0] < 100);
 });
+
+test('legend: top, bottom and right take their room from the plot', () => {
+  const spec = examples.find(([, s]) => s.chart === 'stackedArea')[1];
+  const draw = legend => charts.chart({ ...spec, legend }, { width: 600, height: 300 });
+  const swatches = s => [...s.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="14" height="3"/g)].map(m => [+m[1], +m[2]]);
+  const names = s => [...s.matchAll(/<text x="[\d.]+" y="[\d.]+" font-size="12" fill="var\(--chart-axis-text,#6f7980\)">(Food|Rent|Other)<\/text>/g)].map(m => m[1]);
+  const plot = s => { const m = s.match(/<line x1="([\d.]+)" x2="([\d.]+)" y1="([\d.]+)" y2="\3" stroke="var\(--chart-grid/); return { right: +m[2], bottom: +m[3] }; };
+  const top = draw('top'), bottom = draw('bottom'), right = draw('right');
+  assert.equal(top, draw(true), 'true is the top position');
+  assert.ok(swatches(top).every(([, y]) => y < 60), 'top: under the title');
+  assert.ok(swatches(bottom).every(([, y]) => y > plot(bottom).bottom + 20 && y < 300 - 16), 'bottom: under the axis labels, above the source');
+  assert.ok(plot(bottom).bottom < plot(top).bottom, 'bottom: the plot gives up height');
+  assert.ok(swatches(right).every(([x]) => x > plot(right).right), 'right: beside the plot');
+  assert.ok(plot(right).right < plot(top).right, 'right: the plot gives up width');
+  assert.deepEqual(names(top), ['Food', 'Rent', 'Other']);
+  assert.deepEqual(names(right), ['Other', 'Rent', 'Food'], 'right: the order of the stack, top first');
+  assert.throws(() => draw('left'), /legend must be true, false, "top", "bottom" or "right"/);
+  assert.ok(!draw(false).includes('width="14" height="3"'));
+});
+
+test('legend right on a line chart follows the line ends', () => {
+  const pts = ys => ['a', 'b'].map((x, i) => ({ x, y: ys[i] }));
+  const out = charts.lineChart({ labels: ['a', 'b'], legend: 'right', series: [{ name: 'Low', points: pts([5, 1]) }, { name: 'High', points: pts([1, 9]) }, { name: 'Mid', points: pts([3, 4]) }] });
+  assert.deepEqual([...out.matchAll(/>(Low|High|Mid)<\/text>/g)].map(m => m[1]), ['High', 'Mid', 'Low']);
+});
+
+test('legend positions keep the height of a chart whose height follows its rows', () => {
+  const spec = examples.find(([, s]) => s.chart === 'dumbbell')[1], h = s => +s.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
+  const top = charts.chart({ ...spec, legend: 'top' }), bottom = charts.chart({ ...spec, legend: 'bottom' }), right = charts.chart({ ...spec, legend: 'right' });
+  assert.ok(Math.abs(h(top) - h(bottom)) <= 4, 'bottom adds the room the top legend took');
+  assert.ok(h(right) < h(top), 'right takes width, not height');
+});
