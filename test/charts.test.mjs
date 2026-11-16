@@ -637,19 +637,47 @@ test('chart: the title says what the chart shows, the claim has the finding', ()
 test('callouts: a callout names its point by label and series name', () => {
   const ex = n => examples.find(([, s]) => s.chart === n)[1];
   const ring = s => { const m = s.match(/<circle cx="([\d.]+)" cy="([\d.]+)" r="5" fill="none"/); return m && [+m[1], +m[2]]; };
-  const bars = charts.chart(ex('groupedBars'), { width: 864, height: 360, strict: true });
+  const as = (spec, list) => ({ ...spec, annotations: list });
+  const bars = charts.chart(as(ex('groupedBars'), [{ at: 'Q4', series: 'This year', text: 'below last year', style: 'ring' }]), { width: 864, height: 360, strict: true });
   const bar = bars.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"[^>]*><title>Q4 This year: \$248k<\/title>/);
   assert.ok(Math.abs(ring(bars)[0] - (+bar[1] + +bar[3] / 2)) < 1 && Math.abs(ring(bars)[1] - +bar[2]) < 1, 'the ring sits on the top of the named bar');
   assert.ok(bars.includes('>below last year</text>'));
-  const area = charts.chart({ ...ex('stackedArea'), annotations: [{ at: 'May', series: 'Food', text: 'dip' }] }, { width: 864, height: 360, strict: true });
+  const area = charts.chart(as(ex('stackedArea'), [{ at: 'May', series: 'Food', text: 'dip', style: 'ring' }]), { width: 864, height: 360, strict: true });
   assert.ok(ring(area) && area.includes('>dip</text>'));
-  const par = charts.chart({ ...ex('pareto'), annotations: [{ at: 'Beef', text: 'third' }] }, { width: 864, height: 360, strict: true });
+  const par = charts.chart(as(ex('pareto'), [{ at: 'Beef', text: 'third', style: 'ring' }]), { width: 864, height: 360, strict: true });
   const beef = par.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"[^>]*><title>Beef:/);
   assert.ok(Math.abs(ring(par)[0] - (+beef[1] + +beef[3] / 2)) < 1, 'pareto: the named bar, in the sorted order');
   const hb = charts.chart(ex('hbarChart'), { width: 864, height: 300, strict: true });
-  const text = hb.match(/<text x="([\d.]+)"[^>]*font-weight="700">49% of the spend<\/text>/);
+  const text = hb.match(/<text x="([\d.]+)"[^>]*font-weight="700"[^>]*>49% of the spend<\/text>/);
   assert.ok(text && +text[1] < 864, 'hbarChart: the callout stands on the row, inside the chart');
-  assert.equal(charts.chart({ ...ex('lineChart'), annotations: [{ at: 'Mar', text: 'release' }] }), charts.chart({ ...ex('lineChart'), annotations: [{ index: 2, text: 'release' }] }));
+  assert.equal(charts.chart(as(ex('lineChart'), [{ at: 'Mar', text: 'release' }])), charts.chart(as(ex('lineChart'), [{ index: 2, text: 'release' }])));
+});
+
+test('callout styles: box is the default in a spec; pill, delta, span and event stand in a band above the plot', () => {
+  const bar = examples.find(([, s]) => s.chart === 'barChart')[1], line = examples.find(([, s]) => s.chart === 'lineChart')[1];
+  const draw = (spec, list) => charts.chart({ ...spec, annotations: list }, { width: 864, height: 380, strict: true });
+  const gridTop = s => Math.min(...[...s.matchAll(/<line x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)" y2="\1" stroke="var\(--chart-grid/g)].map(m => +m[1]));
+  const call = 'var\\(--chart-callout,#1b4f91\\)';
+  const box = draw(bar, [{ at: 'Search', text: '27% above Direct' }]);
+  const frame = box.match(new RegExp(`<rect x="([\\d.]+)" y="([\\d.]+)" width="([\\d.]+)" height="([\\d.]+)" rx="3" fill="none" stroke="${call}"[^>]*stroke-dasharray="3 3"`));
+  const mark = box.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="3" fill="[^"]*"><title>Search: 1,240/);
+  assert.ok(frame, 'a dotted frame');
+  assert.ok(+frame[1] < +mark[1] && +frame[1] + +frame[3] > +mark[1] + +mark[3] && +frame[2] < +mark[2], 'the frame goes around the bar and its value');
+  const label = box.match(new RegExp(`<rect x="[\\d.]+" y="([\\d.]+)" width="\\d+" height="22" rx="4" fill="var\\(--chart-paper,#fff\\)" stroke="${call}"`));
+  assert.ok(label && +label[1] + 22 <= gridTop(box), 'the words stand in a white box above the plot, not on the data');
+  assert.ok(new RegExp(`fill="${call}">27% above Direct</text>`).test(box), 'the words take the callout colour');
+  assert.ok(draw(bar, [{ at: 'Search', text: 'x', style: 'ring' }]).includes('r="5" fill="none"'), 'the ring stays available by name');
+  const delta = draw(bar, [{ from: 'Direct', to: 'Search', style: 'delta' }]);
+  assert.ok(delta.includes('>+27%</text>') && delta.includes('<polygon fill="var(--chart-callout'), 'delta computes the change and draws an arrow head');
+  assert.ok(draw(bar, [{ from: 'Search', to: 'Direct', style: 'delta' }]).includes('>−21%</text>'));
+  const span = draw(bar, [{ from: 'Email', to: 'Referral', text: 'two under 700', style: 'span' }]);
+  assert.ok(/fill-opacity=".07" stroke="var\(--chart-callout[^>]*stroke-dasharray="3 3"/.test(span) && span.includes('>two under 700</text>'));
+  assert.ok(draw(line, [{ at: 'Mar', text: 'March release', style: 'event' }]).includes('>March release</text>'));
+  assert.ok(draw(bar, [{ at: 'Search', text: 'x', style: 'pill' }]).includes('fill="var(--chart-callout,#1b4f91)" stroke="var(--chart-callout'));
+  assert.throws(() => draw(bar, [{ at: 'Search', text: 'x', style: 'event' }]), /style "event" marks a period/);
+  assert.throws(() => draw(bar, [{ at: 'Search', text: 'x', style: 'loud' }]), /"style" must be one of/);
+  assert.throws(() => draw(bar, [{ from: 'Search', style: 'delta' }]), /needs "from" and "to"/);
+  assert.equal(charts.barChart({ ...fixtures.barChart, annotations: [{ index: 1, text: 'peak' }] }).includes('r="5" fill="none"'), true, 'a direct call keeps the ring unless a style is given');
 });
 
 test('callouts: a point that is not on the chart, or too many callouts, is refused', () => {
