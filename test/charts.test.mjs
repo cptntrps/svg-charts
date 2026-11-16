@@ -665,3 +665,11 @@ test('format: maxDecimals shows up to that many decimals and no end zeros', () =
   const out = charts.chart({ chart: 'barChart', format: { prefix: '$', maxDecimals: 2 }, data: [{ label: 'A', value: 1.5 }, { label: 'B', value: 2 }, { label: 'C', value: 1.234 }] });
   assert.ok(out.includes('>$1.5<') && out.includes('>$2<') && out.includes('>$1.23<'));
 });
+
+test('chart strict: a box too low for a readable plot is refused', () => {
+  const bar = examples.find(([, s]) => s.chart === 'barChart')[1], line = examples.find(([, s]) => s.chart === 'lineChart')[1];
+  assert.throws(() => charts.chart(bar, { width: 400, height: 100, strict: true }), /the box is too low/);
+  assert.throws(() => charts.chart({ ...line, legend: true }, { width: 400, height: 150, strict: true }), /the plot gets \d+px of height and needs 60/);
+  assert.ok(charts.chart(bar, { width: 400, height: 200, strict: true }).startsWith('<svg '));
+  for (const [file, s] of examples) if (s.chart !== 'sparkline') assert.ok(charts.chart(s, { width: 864, height: 360, strict: true }), file);
+});
