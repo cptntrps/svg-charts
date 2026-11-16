@@ -455,6 +455,8 @@ def open_target(a, spec):
                 raise SpecError(f'--replace "{a.replace}": {len(old)} shapes have that name on slide {a.slide}; see --list')
             box = [v / 12700 for v in (old[0].left, old[0].top, old[0].width, old[0].height)]
             old[0]._element.getparent().remove(old[0]._element)
+            if a.box:                       # the shape goes, the chart takes the box given
+                box = parse_box(a.box)
         elif a.box:
             box = parse_box(a.box)
         else:
