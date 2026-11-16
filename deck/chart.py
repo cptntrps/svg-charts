@@ -160,11 +160,46 @@ def theme_palette(slide, background, dark):
 class Canvas:
     """Writes SVG marks into one group of native shapes, at an offset, in the colours of the deck theme."""
 
-    def __init__(self, slide, name, ox, oy, width, palette=None, dark=False, background=None):
+    def __init__(self, slide, name, ox, oy, width, palette=None, dark=False, background=None, style=None):
         self.grp = slide.shapes.add_group_shape()
         self.grp.name = name
         self.ox, self.oy, self.width, self.palette, self.dark, self.background = ox, oy, width, palette or [], dark, background
+        self.style = dict(style or {})
+        if dark and self.style.get('calloutDark'):
+            self.style['callout'] = self.style['calloutDark']       # the callout colour for a dark slide
+        self.master = slide.slide_layout.slide_master
         self.count = 0
+
+    def resolve(self, css):
+        """The RRGGBB a CSS colour of charts.js has on this slide, for mixing with the background. None for no paint."""
+        kind = parse_color(css)
+        if kind is None:
+            return None
+        what, v = kind
+        if what == 'rgb':
+            return v
+        v = {'up': '1', 'down': '2'}.get(v, v)
+        if v in ACCENTS:
+            i = int(v) - 1
+            return self.palette[i] if i < len(self.palette) else (rt._theme_rgb(self.master, f'accent{v}') or '808080').upper()
+        back = self.background or ('000000' if self.dark else 'FFFFFF')
+        if v == 'paper':
+            return back
+        if v == 'target':
+            return 'C0392B'
+        if v == 'callout':
+            if self.style.get('callout'):
+                return self.style['callout']
+            base = self.palette[0] if self.palette else (rt._theme_rgb(self.master, 'accent1') or '2A78D6')
+            k = (lambda c: round(c + (255 - c) * 0.45)) if self.dark else (lambda c: round(c * 0.68))
+            return '%02X%02X%02X' % tuple(k(int(base[i:i + 2], 16)) for i in (0, 2, 4))
+        g = round(255 * (1 - INK_LEVEL[v] * 0.87)) if self.dark else round(255 * INK_LEVEL[v])
+        return '%02X%02X%02X' % (g, g, g)
+
+    def mix(self, css, opacity):
+        """The solid colour a transparent fill shows on this slide: for a deck style that permits no transparency."""
+        rgb, back = self.resolve(css), self.background or ('000000' if self.dark else 'FFFFFF')
+        return '%02X%02X%02X' % tuple(round(int(rgb[i:i + 2], 16) * opacity + int(back[i:i + 2], 16) * (1 - opacity)) for i in (0, 2, 4))
 
     # ---- colour ----
     def paint(self, color, css, text=False):
@@ -177,6 +212,11 @@ class Canvas:
         what, v = kind
         if what == 'role':
             v = {'up': '1', 'down': '2'}.get(v, v)
+        # A deck style can say that text is never coloured: text that is not ink, muted or paper becomes ink.
+        if text and self.style.get('inkText') and (what == 'rgb' or v not in INK_LEVEL and v != 'paper'):
+            what, v = 'role', 'ink'
+        if what == 'role' and v == 'callout' and self.style.get('callout'):
+            what, v = 'rgb', self.style['callout']
         if what == 'rgb':
             color.rgb = RGBColor.from_string(v)
         elif v in ACCENTS:
@@ -238,8 +278,13 @@ class Canvas:
         if hasattr(shp, 'fill'):
             if closed and el.get('fill') not in (None, 'none', 'transparent'):
                 shp.fill.solid()
-                self.paint(shp.fill.fore_color, el.get('fill'))
-                self._alpha(shp._element.spPr, el.get('fill-opacity'))
+                opacity = el.get('fill-opacity')
+                if self.style.get('opaque') and opacity is not None and float(opacity) < 0.995:
+                    from pptx.dml.color import RGBColor
+                    shp.fill.fore_color.rgb = RGBColor.from_string(self.mix(el.get('fill'), float(opacity)))
+                else:
+                    self.paint(shp.fill.fore_color, el.get('fill'))
+                    self._alpha(shp._element.spPr, opacity)
             else:
                 shp.fill.background()
         if el.get('stroke') in (None, 'none'):
@@ -269,11 +314,14 @@ class Canvas:
         if el.get('fill-opacity') == '0' or (el.get('fill') in (None, 'none', 'transparent') and not el.get('stroke')):
             return                              # a hit area for a tooltip: a slide has no tooltip
         rx = min(float(el.get('rx', 0)), w / 2, h / 2)
+        round_dot = rx > 0.2 and abs(w - h) < 0.5 and rx >= min(w, h) / 2 - 0.2      # a rounded square that is a circle
+        if self.style.get('square') and not round_dot:
+            rx = 0                                  # a deck style where only circles are round
         # Both edges are rounded first and the size is their difference, so bars on one baseline end on one unit.
         x0, y0 = round((self.ox + x) * EMU), round((self.oy + y) * EMU)
         x1, y1 = round((self.ox + x + max(w, 0.1)) * EMU), round((self.oy + y + max(h, 0.1)) * EMU)
-        shp = self.grp.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if rx > 0.2 else MSO_SHAPE.RECTANGLE, x0, y0, x1 - x0, y1 - y0)
-        if rx > 0.2:
+        shp = self.grp.shapes.add_shape(MSO_SHAPE.OVAL if round_dot else MSO_SHAPE.ROUNDED_RECTANGLE if rx > 0.2 else MSO_SHAPE.RECTANGLE, x0, y0, x1 - x0, y1 - y0)
+        if rx > 0.2 and not round_dot:
             shp.adjustments[0] = min(0.5, rx / min(w, h))
         self._style(shp, el)
 
@@ -413,10 +461,15 @@ class Canvas:
         for t, (weight, fill, opacity) in runs:
             run = p.add_run()
             run.text = t
-            run.font.size = Pt(fs)
+            run.font.size = Pt(max(fs, self.style.get('minFont', 0)))
             run.font.bold = str(weight or '400') >= '600'
-            self.paint(run.font.color, fill or 'var(--chart-ink)', text=True)
-            self._alpha(run._r.get_or_add_rPr(), opacity)
+            if self.style.get('opaque') and opacity is not None and float(opacity) < 0.995 and not self.style.get('inkText'):
+                from pptx.dml.color import RGBColor
+                run.font.color.rgb = RGBColor.from_string(self.mix(fill or 'var(--chart-ink)', float(opacity)))
+            else:
+                self.paint(run.font.color, fill or 'var(--chart-ink)', text=True)
+                if not self.style.get('opaque'):
+                    self._alpha(run._r.get_or_add_rPr(), opacity)
         self.count += 1
 
     def draw(self, root):
@@ -438,10 +491,10 @@ class Canvas:
                 raise SpecError(f'deck: the svg element <{tag}> is not drawn')
 
 
-def draw_svg(slide, drawn, box, palette=None, dark=False, background=None):
+def draw_svg(slide, drawn, box, palette=None, dark=False, background=None, style=None):
     """Draw a rendered chart ({chart, width, height, svg}) into the slide at the top left of the box."""
     root = ET.fromstring(drawn['svg'])
-    canvas = Canvas(slide, f"Chart {drawn['chart']}", box[0], box[1], drawn['width'], palette, dark, background)
+    canvas = Canvas(slide, f"Chart {drawn['chart']}", box[0], box[1], drawn['width'], palette, dark, background, style)
     canvas.draw(root)
     canvas.grp._element.xpath('./p:nvGrpSpPr/p:cNvPr')[0].set('descr', root.get('aria-label') or drawn['chart'])
     return canvas
@@ -490,17 +543,18 @@ def fit(path, spec, box, frame):
     return {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box], 'used_pt': [d['width'], d['height'] + head]}
 
 
-def place(slide, path, spec, box, frame, palette, dark, background):
+def place(slide, path, spec, box, frame, palette, dark, background, style=None):
     """Draw one chart into a box of the slide. Returns the receipt fields."""
     out = {'chart': spec['chart'], 'box_pt': [round(v, 1) for v in box]}
     if spec['chart'] == 'rankedTable':
-        g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame={'full': True, 'source': 'source', 'none': False}[frame])
+        g = rt.draw(slide, spec, box, palette[0] if palette else None, dark, frame={'full': True, 'source': 'source', 'none': False}[frame],
+                    min_font=(style or {}).get('minFont', 0))
         out.update(used_height_pt=round(g['height'], 1), rows=[r['label'] for r in g['rows']])
         return out
     # The chart title is a text box of the width of the chart, so the deck program wraps it where the chart ends.
     title, unit, head = chart_title(spec, box[2]) if frame == 'full' else ('', '', 0)
     d = render(path, box[2], box[3] - head, 'source' if frame == 'full' else frame)
-    canvas = draw_svg(slide, d, [box[0], box[1] + head, box[2], box[3] - head], palette, dark, background)
+    canvas = draw_svg(slide, d, [box[0], box[1] + head, box[2], box[3] - head], palette, dark, background, style)
     if head:
         from pptx.util import Pt
         tb = canvas.grp.shapes.add_textbox(Pt(box[0] + 4), Pt(box[1]), Pt(box[2] - 4), Pt(head))
@@ -551,7 +605,7 @@ def side_by_side(specs, box):
              [box[0] + i * (w + GUTTER), box[1] + head_h + 10, w, box[3] - head_h - 10]) for i in range(n)]
 
 
-def section_header(slide, n, text, hbox, dark, palette):
+def section_header(slide, n, text, hbox, dark, palette, rule=True):
     """The header of a section: a rule in the accent colour, a light band, a number badge and the takeaway."""
     from pptx.dml.color import RGBColor
     from pptx.enum.dml import MSO_THEME_COLOR
@@ -579,7 +633,8 @@ def section_header(slide, n, text, hbox, dark, palette):
     else:
         band.fill.fore_color.theme_color = MSO_THEME_COLOR.TEXT_1
         band.fill.fore_color.brightness = 0.93
-    accent(block(f'Section rule {n}', x, y, w, 2).fill.fore_color)
+    if rule:
+        accent(block(f'Section rule {n}', x, y, w, 2).fill.fore_color)
     badge = block(f'Takeaway badge {n}', x + PAD, y + PAD, BADGE, BADGE, MSO_SHAPE.OVAL)
     accent(badge.fill.fore_color)
     bf = badge.text_frame
@@ -613,6 +668,7 @@ def main(argv=None):
     ap.add_argument('--palette', help='RRGGBB,RRGGBB,... in place of theme accents 1 to 5')
     ap.add_argument('--bare', action='store_true', help='leave out the title, unit and source lines of the chart')
     ap.add_argument('--title', help='with two or three specs and --out alone: the claim of the slide')
+    ap.add_argument('--style', help='a JSON file with the chart rules of a deck style: palette, callout, calloutDark, square, opaque, inkText, minFont, sectionRule')
     a = ap.parse_args(argv)
     try:
         if a.list:
@@ -623,7 +679,20 @@ def main(argv=None):
         if len(a.spec) > 3:
             raise SpecError(f'{len(a.spec)} charts: a slide holds 3 at most. Use two slides, or one chart with more series')
         specs = [(path, load(path)) for path in a.spec]
-        palette = [c.strip().lstrip('#').upper() for c in (a.palette or a.accent or '').split(',') if c.strip()]
+        style = {}
+        if a.style:
+            try:
+                with open(a.style, encoding='utf-8') as fh:
+                    style = json.load(fh)
+            except (OSError, json.JSONDecodeError) as e:
+                raise SpecError(f'{a.style}: {e}')
+            unknown = set(style) - {'palette', 'callout', 'calloutDark', 'square', 'opaque', 'inkText', 'minFont', 'sectionRule', 'name'}
+            if unknown:
+                raise SpecError(f'{a.style}: unknown keys {sorted(unknown)}. A deck style takes palette, callout, calloutDark, square, opaque, inkText, minFont, sectionRule')
+            for key in ('callout', 'calloutDark'):
+                if style.get(key):
+                    style[key] = style[key].lstrip('#').upper()
+        palette = [c.strip().lstrip('#').upper() for c in (a.palette or a.accent or ','.join(style.get('palette') or [])).split(',') if c.strip()]
         if any(not re.fullmatch(r'[0-9A-F]{6}', c) for c in palette):
             raise SpecError('--palette and --accent take colours as RRGGBB')
         many = len(specs) > 1
@@ -657,17 +726,17 @@ def main(argv=None):
         # The subtitle of a new deck stands under its title. In an existing slide it stands at the top of the box.
         box = rt.furnish(slide, box, a.subtitle if a.into else None, a.takeaway, dark, palette[0] if palette else None)
         receipt = {'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1}
-        if not (a.palette or a.accent) and palette:
+        if not (a.palette or a.accent or style.get('palette')) and palette:
             receipt['palette'] = 'theme accents that read on this slide, then greys: ' + ','.join(palette)
         frame = 'none' if a.bare else 'full'          # each chart has its own title and its own source
         if many:
             charts = []
             for n, ((p, s), (lines, hbox, cbox)) in enumerate(zip(specs, side_by_side(specs, box)), 1):
-                section_header(slide, n, s['claim'], hbox, dark, palette)
-                charts.append(place(slide, p, s, cbox, frame, palette, dark, background))
+                section_header(slide, n, s['claim'], hbox, dark, palette, style.get('sectionRule', True))
+                charts.append(place(slide, p, s, cbox, frame, palette, dark, background, style))
             receipt['charts'] = charts
         else:
-            receipt.update(place(slide, path, spec, box, frame, palette, dark, background))
+            receipt.update(place(slide, path, spec, box, frame, palette, dark, background, style))
         receipt['ink'] = 'light ink for a dark slide' if dark else 'theme text colour for a light slide'
         prs.save(a.out)
         print(json.dumps(receipt))

@@ -313,6 +313,45 @@ class ChartDeck(unittest.TestCase):
             ch.rt._theme_rgb = real
         self.assertAlmostEqual(ch._contrast('000000', 'FFFFFF'), 21, places=0)
 
+    def test_a_deck_style_makes_the_chart_follow_the_rules_of_a_brand(self):
+        style = self.dir / 'style.json'
+        style.write_text(json.dumps({'palette': ['112233', '445566', '778899'], 'callout': '0A0B0C', 'square': True, 'opaque': True,
+                                     'inkText': True, 'minFont': 10, 'sectionRule': False}), encoding='utf-8')
+        ex = ROOT / 'examples'
+        spec = json.loads((ex / 'stacked-area.json').read_text(encoding='utf-8'))
+        spec['annotations'] = [{'at': 'May', 'series': 'Food', 'text': 'food dips'}]
+        out = self.dir / 'styled.pptx'
+        code, _, err = run(self.write(spec), ex / 'grouped-bars.json', '--out', out, '--title', 'Two charts in a brand style', '--style', style)
+        self.assertEqual(code, 0, err)
+        slide = Presentation(out).slides[0]
+        a = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+        shapes = [s for g in slide.shapes if g.shape_type == MSO_SHAPE_TYPE.GROUP for s in g.shapes]
+        self.assertFalse([s.name for s in shapes if s._element.find(f'.//{a}prstGeom') is not None
+                          and s._element.find(f'.//{a}prstGeom').get('prst') == 'roundRect'], 'square: no rounded rectangle')
+        self.assertFalse(slide._element.findall(f'.//{a}alpha'), 'opaque: no transparent fill')
+        colours = {str(r.font.color.rgb) for s in shapes if s.has_text_frame for p in s.text_frame.paragraphs for r in p.runs
+                   if r.font.color and r.font.color.type is not None and r.font.color.rgb is not None} if False else set()
+        for s in shapes:
+            if s.has_text_frame:
+                for p in s.text_frame.paragraphs:
+                    for r in p.runs:
+                        fill = r._r.find(f'{a}rPr/{a}solidFill')
+                        if fill is not None and fill[0].tag == f'{a}srgbClr':
+                            colours.add(fill[0].get('val'))
+                        self.assertGreaterEqual(r.font.size.pt, 10)
+        self.assertFalse(colours - {'FFFFFF', '000000'}, 'inkText: the words of a callout are not coloured')
+        fills = {s._element.find(f'.//{a}solidFill')[0].get('val') for s in shapes if s._element.find(f'.//{a}solidFill') is not None}
+        self.assertTrue({'112233', '445566'} <= fills, 'the palette of the style')
+        self.assertIn('0A0B0C', {el.get('val') for el in slide._element.iter(f'{a}srgbClr')}, 'the callout colour of the style')
+        self.assertFalse([s for s in slide.shapes if s.name.startswith('Section rule')], 'sectionRule: false')
+        area = next(s for s in shapes if s.name == 'Food')
+        self.assertNotEqual(str(area.fill.fore_color.rgb), '112233', 'a transparent fill becomes its solid mix with the slide')
+        bad = self.dir / 'bad.json'
+        bad.write_text('{"rounded": true}', encoding='utf-8')
+        code, _, err = run(ex / 'bar-chart.json', '--out', self.dir / 'x.pptx', '--style', bad)
+        self.assertEqual(code, 2)
+        self.assertIn('unknown keys', err)
+
     def test_check_reports_the_fit_without_a_deck(self):
         code, receipt, _ = run(ROOT / 'examples' / 'heatmap.json', '--check')
         self.assertEqual(code, 0)

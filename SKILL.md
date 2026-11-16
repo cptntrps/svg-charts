@@ -205,6 +205,20 @@ uses the variable, or the fallback when the page does not set it; the slide uses
 fixed one. On a dark slide the ink is light; the script reads the background from the deck, and `--on dark`
 sets it when the background is a picture.
 
+`--style style.json` makes the chart follow the chart rules of a brand guide that the theme cannot carry:
+
+| Key | Effect |
+|---|---|
+| `palette` | the series colours, as RRGGBB, in order |
+| `callout`, `calloutDark` | the colour of callout frames, lines and boxes on a light and on a dark slide |
+| `square` | `true`: no rounded corners; only circles stay round |
+| `opaque` | `true`: no transparency; a transparent fill becomes its solid mix with the slide background |
+| `inkText` | `true`: text is never coloured; the words of a callout and a target label take the text colour |
+| `minFont` | the smallest text size in points |
+| `sectionRule` | `false`: no rule above a section header |
+
+Read the brand guide, write its rules into this file once, and pass it for every chart of that deck.
+
 The script needs `python-pptx`, and `node` for every chart but `rankedTable` (`charts.js` computes the
 geometry). Exit 0 prints one JSON line (the chart, the box, the size used). Exit 2 means nothing is written,
 with the reason and the remedy. A slide never gets an ellipsis, smaller text or a missing label.
