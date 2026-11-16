@@ -177,7 +177,9 @@ The chart is one group of native shapes that a person can edit in PowerPoint: ba
 are lines, slices are arcs, each label is a text box, and each mark has its tooltip text as its name.
 One point on the slide is one pixel of the page chart, so the text keeps the size the builder gives it
 (10 to 14pt). Colours and fonts come from the deck theme: accents 1 to 5 for the palette, text 1 for the
-ink, so the chart takes the look of the template. `--palette RRGGBB,RRGGBB` (or `--accent RRGGBB`) forces
+ink, so the chart takes the look of the template. An accent that is too pale to read on the slide (contrast
+under 2 to 1 with the background, such as the light tint of a brand colour on white) is left out, and greys
+from the text colour fill the list; the receipt then names the colours used. `--palette RRGGBB,RRGGBB` (or `--accent RRGGBB`) forces
 colours. A colour you set in the spec is kept: write `var(--chart-2,#0ca37a)` for a theme colour (the page
 uses the variable, or the fallback when the page does not set it; the slide uses accent 2) or `#RRGGBB` for a
 fixed one. On a dark slide the ink is light; the script reads the background from the deck, and `--on dark`

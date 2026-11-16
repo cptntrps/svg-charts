@@ -295,6 +295,24 @@ class ChartDeck(unittest.TestCase):
         claims = [s for s in slide.shapes if s.name.startswith('Section band')]
         self.assertGreaterEqual(min(c.top for c in claims) - (title.top + title.height), 22 * PT - 1, 'the sections do not stand against the title')
 
+    def test_series_colours_leave_out_theme_accents_too_pale_for_the_slide(self):
+        prs = Presentation(self.base_deck())
+        slide = prs.slides[0]
+        self.assertEqual(ch.theme_palette(slide, None, False), [], 'every accent of this theme reads on white: theme colours stay')
+        brand = {f'accent{i}': c for i, c in enumerate(('007AC3', 'A6D1EA', '85BC20', 'C2DD90', 'E5202E', 'FAD2D5'), 1)}
+        real = ch.rt._theme_rgb
+        ch.rt._theme_rgb = lambda master, name: brand.get(name, real(master, name))
+        try:
+            light = ch.theme_palette(slide, None, False)
+            self.assertEqual(light[:3], ['007AC3', '85BC20', 'E5202E'], 'the light tints are left out on a white slide')
+            self.assertEqual(len(light), 5, 'greys fill the list')
+            for c in light:
+                self.assertGreaterEqual(ch._contrast(c, 'FFFFFF'), 2)
+            self.assertEqual(ch.theme_palette(slide, '000000', True), [], 'on a dark slide the first five accents all read')
+        finally:
+            ch.rt._theme_rgb = real
+        self.assertAlmostEqual(ch._contrast('000000', 'FFFFFF'), 21, places=0)
+
     def test_check_reports_the_fit_without_a_deck(self):
         code, receipt, _ = run(ROOT / 'examples' / 'heatmap.json', '--check')
         self.assertEqual(code, 0)
