@@ -57,32 +57,49 @@ const axisText = (x, y, anchor, t, extra = '') => {
 // bottom band (16px) holds "Source: ...". Builders add the bands to their own
 // margins so the plot shrinks and the svg keeps the height the caller passed.
 const TOP_BAND = 22, BOTTOM_BAND = 16;
-// Height of the band above the plot: 22px for "Title · unit" on one line, 38px when the line is wider than the
-// chart (a narrow page, two or three charts on one slide): the unit then stands on its own line under the title.
-let STACK_TITLE = false;      // chart(spec, { stackTitle: true }): the unit always stands under the title
+// The title of a chart says what the chart shows, with its unit: "Title · unit". It runs the width of the chart and
+// goes to a next line only where the chart ends (a narrow page, two or three charts on one slide). Three lines at
+// most; a longer title is shortened. Returns the lines as [word, isTitle] pairs.
+function titleLines(title, unit, W) {
+  const words = [];
+  if (title != null) String(title).split(/\s+/).filter(Boolean).forEach(w => words.push([w, true]));
+  if (unit != null) { if (title != null) words.push(['·', false]); String(unit).split(/\s+/).filter(Boolean).forEach(w => words.push([w, false])); }
+  if (W == null || textW(words.map(w => w[0]).join(' '), 14) * 0.86 <= W - 8) return [words];
+  const room = (W - 8) / 0.86, lines = [[]];
+  words.forEach(w => {
+    const line = lines[lines.length - 1];
+    if (line.length && textW(line.map(x => x[0]).concat(w[0]).join(' '), 14) > room) lines.push([w]); else line.push(w);
+  });
+  if (lines.length > 3) { const last = lines.slice(2).flat(); lines.length = 2; lines.push([[fit(last.map(x => x[0]).join(' '), room, 14), last[0][1]]]); }
+  return lines;
+}
+// Height of the band above the plot: 22px for one title line and 16px for each line after it.
 function topBand(title, unit, W) {
   if (title == null && unit == null) return 0;
-  if (STACK_TITLE && title != null && unit != null) return TOP_BAND + 16;
-  return title != null && unit != null && W != null && textW(title + ' · ' + unit, 14) * 0.86 > W - 8 ? TOP_BAND + 16 : TOP_BAND;
+  return TOP_BAND + 16 * (titleLines(title, unit, W).length - 1);
 }
 function frame({ title, unit, source, H, W }) {
-  const top = topBand(title, unit, W), two = top > TOP_BAND;
-  // A line that is still wider than the chart is shortened.
+  const lines = title != null || unit != null ? titleLines(title, unit, W) : [], top = lines.length ? TOP_BAND + 16 * (lines.length - 1) : 0;
   const room = W != null ? (W - 8) / 0.86 : Infinity;
-  if (two) { title = fit(title, room, 14); unit = fit(unit, room, 12); }
-  else if (top && textW((title ?? '') + (unit ?? ''), 14) > room) { if (unit != null) unit = fit(unit, room, 14); else title = fit(title, room, 14); }
   let deco = '';
-  if (two) {
-    deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${esc(title)}</text>` +
-      `<text x="4" y="31" font-size="12" fill="${AXIS}">${esc(unit)}</text>`;
-  } else if (top) {
+  if (lines.length === 1) {
     const u = unit != null ? `<tspan font-weight="400" fill="${AXIS}">${title != null ? ' · ' : ''}${esc(unit)}</tspan>` : '';
     deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${title != null ? esc(title) : ''}${u}</text>`;
-  }
+  } else lines.forEach((line, i) => {
+    // Runs of title words (bold ink) and unit words (regular, axis colour) on one line.
+    let out = '', k = 0;
+    while (k < line.length) {
+      let j = k; while (j < line.length && line[j][1] === line[k][1]) j++;
+      const text = (k ? ' ' : '') + esc(line.slice(k, j).map(w => w[0]).join(' '));
+      out += line[k][1] ? text : `<tspan font-weight="400" fill="${AXIS}">${text}</tspan>`;
+      k = j;
+    }
+    deco += `<text x="4" y="${15 + 16 * i}" font-size="14" font-weight="700" fill="${INK}">${out}</text>`;
+  });
   if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(W != null ? fit(source, room - textW('Source: ', 10), 10) : source)}</text>`;
-  const titleLine = two ? String(title) : (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '');
+  const first = lines.length ? lines[0].map(w => w[0]).join(' ') : '';
   return { top, bottom: source != null ? BOTTOM_BAND : 0, deco,
-    titleBox: top ? labelBox(4, 15, titleLine, 'start', 14, 0) : null };
+    titleBox: top ? labelBox(4, 15, lines.length === 1 ? (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '') : first, 'start', 14, 0) : null };
 }
 
 // Builders draw their body twice when a band callout needs its own row under the
@@ -1153,7 +1170,6 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
 // strict (a slide, a printed report): nothing may be cut or left out; an empty chart, a shortened label, labels that
 // overlap or a word without room throw a RangeError that names the remedy. bare leaves out title, unit and source;
 // bare: 'title' leaves out title and unit and keeps the source (the page or the slide has its own subtitle).
-// stackTitle puts the unit on its own line under the title at every width, so charts side by side start level.
 // =====================================================================================
 const COMMON = ['chart', 'claim', 'title', 'unit', 'source', 'label', 'width', 'height', 'format', 'formatX'];
 const rowsFit = (opt, min, max) => ({ opt, min, max });
@@ -1215,11 +1231,7 @@ const SLOTS = {
 };
 const svgHeight = out => +out.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
 
-export function chart(spec, { width, height, strict = false, bare = false, stackTitle = false } = {}) {
-  STACK_TITLE = stackTitle;
-  try { return drawSpec(spec, { width, height, strict, bare }); } finally { STACK_TITLE = false; }
-}
-function drawSpec(spec, { width, height, strict, bare }) {
+export function chart(spec, { width, height, strict = false, bare = false } = {}) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new RangeError('the spec must be an object');
   const type = chartTypes[spec.chart];
   if (!type) throw new RangeError(`"chart" must be one of: ${Object.keys(chartTypes).join(', ')}`);
@@ -1230,7 +1242,7 @@ function drawSpec(spec, { width, height, strict, bare }) {
   if (spec.formatX && !type.fmtX) throw new RangeError(`${what} has one value axis: remove "formatX"`);
   // The title of a chart says what the chart shows (the measure, by what, when). The finding goes in the claim.
   if (spec.title != null && spec.claim != null && String(spec.title).trim() === String(spec.claim).trim()) throw new RangeError(`${what}: "title" repeats the claim. The title says what the chart shows ("Orders by channel"); the claim has the finding`);
-  if (spec.title != null && String(spec.title).length > 60) throw new RangeError(`${what}: "title" has ${String(spec.title).length} characters, the limit is 60. The title names what the chart shows; a sentence with the finding goes in "claim"`);
+  if (spec.title != null && String(spec.title).length > 80) throw new RangeError(`${what}: "title" has ${String(spec.title).length} characters, the limit is 80. The title names the data on the chart; a sentence with the finding goes in "claim"`);
   const limit = LIMITS[what]?.(spec);
   if (limit) throw new RangeError(`${what}: ${limit}`);
   const o = {};
