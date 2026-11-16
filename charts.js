@@ -57,22 +57,30 @@ const axisText = (x, y, anchor, t, extra = '') => {
 // bottom band (16px) holds "Source: ...". Builders add the bands to their own
 // margins so the plot shrinks and the svg keeps the height the caller passed.
 const TOP_BAND = 22, BOTTOM_BAND = 16;
+// Height of the band above the plot: 22px for "Title · unit" on one line, 38px when the line is wider than the
+// chart (a narrow page, two or three charts on one slide): the unit then stands on its own line under the title.
+function topBand(title, unit, W) {
+  if (title == null && unit == null) return 0;
+  return title != null && unit != null && W != null && textW(title + ' · ' + unit, 14) * 0.86 > W - 8 ? TOP_BAND + 16 : TOP_BAND;
+}
 function frame({ title, unit, source, H, W }) {
-  const hasTop = title != null || unit != null;
-  // A line that is wider than the chart is shortened: the unit first, and the title when there is no unit.
-  const room = W != null ? W - 8 : Infinity, sep = title != null && unit != null ? ' · ' : '';
-  const long = textW((title ?? '') + sep + (unit ?? ''), 14) * 0.86 > room;
-  if (long && unit != null) unit = fit(unit, Math.max(14, room / 0.86 - textW((title ?? '') + sep, 14)), 14);
-  if (long && title != null && textW(title + sep + (unit ?? ''), 14) * 0.86 > room) title = fit(title, Math.max(14, room / 0.86 - textW(sep + (unit ?? ''), 14)), 14);
+  const top = topBand(title, unit, W), two = top > TOP_BAND;
+  // A line that is still wider than the chart is shortened.
+  const room = W != null ? (W - 8) / 0.86 : Infinity;
+  if (two) { title = fit(title, room, 14); unit = fit(unit, room, 12); }
+  else if (top && textW((title ?? '') + (unit ?? ''), 14) > room) { if (unit != null) unit = fit(unit, room, 14); else title = fit(title, room, 14); }
   let deco = '';
-  if (hasTop) {
+  if (two) {
+    deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${esc(title)}</text>` +
+      `<text x="4" y="31" font-size="12" fill="${AXIS}">${esc(unit)}</text>`;
+  } else if (top) {
     const u = unit != null ? `<tspan font-weight="400" fill="${AXIS}">${title != null ? ' · ' : ''}${esc(unit)}</tspan>` : '';
     deco += `<text x="4" y="15" font-size="14" font-weight="700" fill="${INK}">${title != null ? esc(title) : ''}${u}</text>`;
   }
-  if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(W != null ? fit(source, room / 0.86 - textW('Source: ', 10), 10) : source)}</text>`;
-  const titleLine = (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '');
-  return { top: hasTop ? TOP_BAND : 0, bottom: source != null ? BOTTOM_BAND : 0, deco,
-    titleBox: hasTop ? labelBox(4, 15, titleLine, 'start', 14, 0) : null };
+  if (source != null) deco += `<text x="4" y="${H - 4}" font-size="10" fill="${AXIS}">Source: ${esc(W != null ? fit(source, room - textW('Source: ', 10), 10) : source)}</text>`;
+  const titleLine = two ? String(title) : (title != null ? String(title) : '') + (unit != null ? (title != null ? ' · ' : '') + unit : '');
+  return { top, bottom: source != null ? BOTTOM_BAND : 0, deco,
+    titleBox: top ? labelBox(4, 15, titleLine, 'start', 14, 0) : null };
 }
 
 // Builders draw their body twice when a band callout needs its own row under the
@@ -165,7 +173,7 @@ function callout(px, py, text, geo, own, ringOnly = false) {
     if (clear(b2)) { base = b2; below = true; }
     else {
       inBand = true; d = -1; tx = W - 4; x0 = tx - tw; base = top > 0 ? 15 : plotTop - 2;
-      if (title && x0 < title.x1 + 8) { if (extraTop > 0) base = 15 + LEGEND_ROW; else band.need = true; }
+      if (title && x0 < title.x1 + 8) { if (extraTop > 0) base = top - 7 + LEGEND_ROW; else band.need = true; }
     }
   }
   const y1 = below ? py + 4 : py - 4, y2 = below ? base - 13 : base - 4;
@@ -443,7 +451,7 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
 // Its legend names the two ends: a hollow marker for `aLabel`, a filled one for `bLabel`.
 export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel = 'B', fmtY = num,
   title, unit, source, annotations = [], legend = false, colors } = {}) {
-  const plotH = Math.max(120, 16 + 28 + rows.length * 38), bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const plotH = Math.max(120, 16 + 28 + rows.length * 38), bandTop = topBand(title, unit, width);
   const entries = legend ? [{ name: aLabel, color: INK, marker: 'hollow' }, { name: bLabel, color: INK, marker: 'filled' }] : [];
   const lab = label ?? title ?? 'dumbbell', W = width, band = {};
   const vals = rows.flatMap(r => [r.a, r.b]).filter(fin);
@@ -452,7 +460,9 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
     const lg = legendRows(entries, W, bandTop + extraTop);
     const f = frame({ title, unit, source, H: plotH + bandTop + extraTop + lg.height + (source != null ? BOTTOM_BAND : 0) , W: width });
     const deco = f.deco + lg.svg;
-    const L = 150, R = 20, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + f.bottom;
+    // The label column is 150px; in a narrow chart it is as wide as the longest label, so the rows keep room.
+    const L = W < 460 ? Math.min(150, Math.ceil(Math.max(0, ...rows.map(r => textW(r.label, 12)))) + 18) : 150;
+    const R = 20, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + f.bottom;
     if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
     const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
     const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
@@ -529,7 +539,7 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   title, unit, source, legend = false, colors, highlight = null, diverging = false } = {}) {
   const lab = label ?? title ?? 'bar chart', W = width;
   const groups = seriesLegend(data, colors), entries = legend ? groups : [];
-  const bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const bandTop = topBand(title, unit, width);
   const lg = legendRows(entries, W, bandTop);
   const Tp = bandTop + lg.height + 6, plotH = Math.max(1, data.length) * rowHeight;
   const height = Tp + plotH + 6 + (source != null ? BOTTOM_BAND : 0);
@@ -602,7 +612,7 @@ export function donut({ slices = [], label, width = 600, height = 220, fmtY = nu
 // One hue; the opacity follows the value from the lowest (or zero) to the highest. Height follows the rows.
 export function heatmap({ rows = [], cols = [], cells = [], label, width = 600, cellHeight, fmtY = num,
   title, unit, source, color, cellLabels = true } = {}) {
-  const lab = label ?? title ?? 'heatmap', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lab = label ?? title ?? 'heatmap', W = width, bandTop = topBand(title, unit, width);
   const L = rows.length ? Math.min(Math.ceil(Math.max(...rows.map(r => textW(r, 11)))) + 10, Math.round(W * 0.3)) : 10;
   const cw = (W - L - 4) / Math.max(1, cols.length), ch = cellHeight ?? Math.max(18, Math.min(34, cw));
   const Tp = bandTop + 20, plotH = Math.max(1, rows.length) * ch, scaleY = Tp + plotH + 8;
@@ -753,7 +763,7 @@ export function slope({ rows = [], label, width = 600, height = 300, aLabel = 'B
 // ---------- bullet (a value against its target, one row per item) ----------
 // rows: [{ label, value, target, color? }]. The bar is the value; the tick is the target. Height follows the rows.
 export function bullet({ rows = [], label, width = 600, rowHeight = 40, fmtY = num, title, unit, source, colors, overColor = null } = {}) {
-  const lab = label ?? title ?? 'bullet', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lab = label ?? title ?? 'bullet', W = width, bandTop = topBand(title, unit, width);
   const Tp = bandTop + 4, height = Tp + Math.max(1, rows.length) * rowHeight + 4 + (source != null ? BOTTOM_BAND : 0);
   const f = frame({ title, unit, source, H: height , W: width });
   if (!rows.length) return noData(W, height, f.deco, lab);
@@ -809,7 +819,7 @@ export function histogram({ values = null, bins = 12, label, width = 600, height
 // ---------- box plot (spread of a measure per group: min, quartiles, median, max) ----------
 // groups: [{ label, values: [...] }] or [{ label, min, q1, median, q3, max }]. Horizontal; height follows the rows.
 export function boxPlot({ groups = [], label, width = 600, rowHeight = 34, fmtY = num, title, unit, source, colors } = {}) {
-  const lab = label ?? title ?? 'box plot', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lab = label ?? title ?? 'box plot', W = width, bandTop = topBand(title, unit, width);
   const Tp = bandTop + 6, plotH = Math.max(1, groups.length) * rowHeight, B = 22;
   const height = Tp + plotH + B + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height , W: width });
   const q = (v, p) => { const k = (v.length - 1) * p, a = Math.floor(k), b = Math.ceil(k); return v[a] + (v[b] - v[a]) * (k - a); };
@@ -844,7 +854,7 @@ export function boxPlot({ groups = [], label, width = 600, rowHeight = 34, fmtY 
 // days: [{ date: 'YYYY-MM-DD', value }]. Covers the first to the last date given; a day without a value is empty.
 // `cell` is the largest size of a day cell (22px by default); the cells shrink when the weeks need more width.
 export function calendar({ days = [], label, width = 600, fmtY = num, title, unit, source, color, cell: maxCell = 22 } = {}) {
-  const lab = label ?? title ?? 'calendar', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0, DAY = 86400000;
+  const lab = label ?? title ?? 'calendar', W = width, bandTop = topBand(title, unit, width), DAY = 86400000;
   const parse = (d, i) => { const t = Date.parse(d + 'T00:00:00Z'); if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d)) || Number.isNaN(t)) throw new RangeError(`calendar day ${i} date must be YYYY-MM-DD`); return t; };
   const at = new Map();
   days.forEach((d, i) => { const t = parse(d.date, i); if (d.value != null) { if (!fin(d.value)) throw new RangeError(`calendar day ${i} value is not a number`); at.set(t, d.value); } else if (!at.has(t)) at.set(t, null); });
@@ -902,7 +912,7 @@ export function treemap({ items = [], label, width = 600, height = 260, fmtY = n
 // ---------- funnel (how many remain at each stage) ----------
 // stages: [{ label, value }] in order. Each row shows its value and its share of the first stage.
 export function funnel({ stages = [], label, width = 600, rowHeight = 44, fmtY = num, title, unit, source, color } = {}) {
-  const lab = label ?? title ?? 'funnel', W = width, bandTop = title != null || unit != null ? TOP_BAND : 0;
+  const lab = label ?? title ?? 'funnel', W = width, bandTop = topBand(title, unit, width);
   const Tp = bandTop + 4, height = Tp + Math.max(1, stages.length) * rowHeight + (source != null ? BOTTOM_BAND : 0), f = frame({ title, unit, source, H: height , W: width });
   if (!stages.length) return noData(W, height, f.deco, lab);
   stages.forEach((st, i) => nonNeg(st.value, `funnel stage ${i}`));
@@ -1071,7 +1081,7 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
   const x0 = stack ? 4 : nameW, x1 = W - tableW - 8, edge = []; let acc = x1 + 8;
   cw.forEach(w => { acc += w; edge.push(acc); });
   const rh = stack ? rowHeight + 12 : rowHeight, bh = Math.max(6, Math.min(16, rowHeight - 20));
-  const bandTop = title != null || unit != null ? TOP_BAND : 0, T = bandTop + 26;
+  const bandTop = topBand(title, unit, width), T = bandTop + 26;
   const notes = list.filter(r => r.flag).flatMap(r => wrapText(`* ${r.label}: ${r.flag}`, W - 8, 11));
   const height = T + Math.max(1, list.length) * rh + 8 + (notes.length ? notes.length * 15 + 4 : 0) + (source != null ? BOTTOM_BAND : 0);
   const f = frame({ title, unit, source, H: height , W: width });

@@ -63,6 +63,7 @@ el.innerHTML = chart(spec, { width: el.clientWidth });
 ```sh
 python3 deck/chart.py examples/waterfall.json --out chart.pptx
 python3 deck/chart.py examples/waterfall.json --into deck.pptx --slide 3 --replace "Text Placeholder 2" --out deck2.pptx
+python3 deck/chart.py examples/gauge.json examples/funnel.json examples/slope.json --out slide.pptx --title "Three facts on one slide"
 ```
 
 The code refuses a spec it cannot draw honestly (a spelling error in a field, 7 donut slices, a waterfall
