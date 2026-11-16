@@ -205,14 +205,15 @@ def background_is_dark(prs, slide):
 
 def draw(slide, spec, box, accent=None, dark=False, frame=False):
     """Draw the chart into the slide as one group of native shapes. Returns the layout.
-    frame=True also writes "title · unit" above the chart and the source under it, inside the box."""
+    frame=True also writes "title · unit" above the chart and the source under it, inside the box.
+    frame='source' writes the source only (the slide has its own subtitle)."""
     from pptx.dml.color import RGBColor
     from pptx.enum.dml import MSO_THEME_COLOR
     from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
     from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
     from pptx.util import Pt
 
-    head = [str(spec[k]) for k in ('title', 'unit') if frame and spec.get(k)]
+    head = [str(spec[k]) for k in ('title', 'unit') if frame is True and spec.get(k)]
     foot = f"Source: {spec['source']}" if frame and spec.get('source') else None
     band_top, band_bottom = (22 if head else 0), (16 if foot else 0)
     g = layout(spec, (box[0], box[1] + band_top, box[2], box[3] - band_top - band_bottom))
@@ -338,6 +339,8 @@ def add_target_args(ap, many=False):
     ap.add_argument('--on', choices=['light', 'dark'], help='background of the slide; read from the deck when not given')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--list')
+    ap.add_argument('--subtitle', help='one or two lines under the slide title that say what the numbers are: the measure, the unit, the period. Not a comment on the chart. The default is the "title · unit" of the spec')
+    ap.add_argument('--takeaway', help='one or two bold lines under the chart: the comment, what the reader must conclude or do')
 
 
 def parse_box(text):
@@ -350,21 +353,96 @@ def parse_box(text):
     return box
 
 
-def new_deck_box(spec):
-    """Title lines and the chart box of the one-slide deck that --out writes."""
+SUB_FS, SUB_LINE = 14, 19        # subtitle and takeaway text
+TITLE_GAP = 22                   # points between the title block and the chart
+
+
+def new_deck_box(spec, subtitle=None):
+    """Layout of the one-slide deck that --out writes: the claim as the title, the subtitle under it, then the
+    chart box. The subtitle says what the numbers are (the measure, the unit, the period): the "title · unit" of
+    the spec when none is given. Returns a dict; `box` is x, y, w, h in points."""
     head = wrap(spec.get('claim') or spec.get('title') or '', 864, 24, 0.56)
     if len(head) > 3:
         raise SpecError(f'the claim needs {len(head)} lines at 24pt, the slide holds 3: shorten it')
     head_h = 30 * max(1, len(head))
-    sub = ' · '.join(str(spec[k]) for k in (('title', 'unit') if spec.get('claim') else ('unit',)) if spec.get(k))
-    top = 36 + head_h + (30 if sub else 10)
-    return head, head_h, sub, [48, top, 864, 486 - top]
+    text = subtitle or ' · '.join(str(spec[k]) for k in (('title', 'unit') if spec.get('claim') else ('unit',)) if spec.get(k))
+    lines = wrap(text, 864, SUB_FS) if text else []
+    if len(lines) > 2:
+        raise SpecError(f'the subtitle needs {len(lines)} lines, it has 2: shorten it')
+    top = 32 + head_h + 6 + (SUB_LINE * len(lines) + 4 if lines else 0) + TITLE_GAP
+    return dict(head=head, head_h=head_h, subtitle=text, box=[48, top, 864, 486 - top])
+
+
+def furnish_box(box, subtitle=None, takeaway=None):
+    """The chart box that stays when a subtitle stands at the top of the box and a takeaway at its bottom."""
+    x, y, w, h = box
+    sub = wrap(subtitle, w, SUB_FS) if subtitle else []
+    take = wrap(takeaway, w - 14, SUB_FS) if takeaway else []
+    for name, lines in (('subtitle', sub), ('takeaway', take)):
+        if len(lines) > 2:
+            raise SpecError(f'the {name} needs {len(lines)} lines in {w:.0f}pt, it has 2: shorten it')
+    top = SUB_LINE * len(sub) + TITLE_GAP if sub else 0
+    bottom = SUB_LINE * len(take) + 10 + 16 if take else 0
+    return [x, y + top, w, h - top - bottom], sub, take
+
+
+def _ink(color, level, dark):
+    from pptx.dml.color import RGBColor
+    from pptx.enum.dml import MSO_THEME_COLOR
+    if dark:
+        v = round(255 * (1 - level * 0.87))
+        color.rgb = RGBColor(v, v, v)
+    else:
+        color.theme_color = MSO_THEME_COLOR.TEXT_1
+        if level:
+            color.brightness = level
+
+
+def furnish(slide, box, subtitle=None, takeaway=None, dark=False, accent=None):
+    """Write the subtitle at the top of the box and the takeaway (an accent bar and a bold line) at its bottom.
+    Returns the box that stays for the chart."""
+    from pptx.dml.color import RGBColor
+    from pptx.enum.dml import MSO_THEME_COLOR
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR
+    from pptx.util import Pt
+    chart_box, sub, take = furnish_box(box, subtitle, takeaway)
+    x, y, w, h = box
+
+    def line(name, s, left, top, width, height, bold, level):
+        tb = slide.shapes.add_textbox(Pt(left), Pt(top), Pt(width), Pt(height))
+        tb.name = name
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        run = tf.paragraphs[0].add_run()
+        run.text = s
+        run.font.size = Pt(SUB_FS)
+        run.font.bold = bold
+        _ink(run.font.color, level, dark)
+    if sub:
+        line('Subtitle', subtitle, x, y, w, SUB_LINE * len(sub), False, 0.35)
+    if take:
+        th = SUB_LINE * len(take) + 10
+        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Pt(x), Pt(y + h - th), Pt(4), Pt(th))
+        bar.name = 'Takeaway bar'
+        bar.shadow.inherit = False
+        bar.line.fill.background()
+        bar.fill.solid()
+        if accent:
+            bar.fill.fore_color.rgb = RGBColor.from_string(accent)
+        else:
+            bar.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
+        line('Takeaway', takeaway, x + 14, y + h - th, w - 14, th, True, 0.0)
+    return chart_box
 
 
 def open_target(a, spec):
     """The deck, the slide and the box (x, y, w, h in points) the chart goes to.
     With --into: an existing slide, the box of --replace (that shape is removed) or --box.
-    Without: a new 16:9 deck with one slide: the claim as its title, "title · unit" under it, the source at the bottom."""
+    Without: a new 16:9 deck with one slide: the claim as its title, the subtitle, "title · unit" under it,
+    the source at the bottom."""
     from pptx import Presentation
     from pptx.util import Pt
     if a.into:
@@ -386,30 +464,46 @@ def open_target(a, spec):
         if box[0] < 0 or box[1] < 0 or box[0] + box[2] > sw + 0.5 or box[1] + box[3] > sh + 0.5:
             raise SpecError(f'the box {box} is outside the {sw:.0f}x{sh:.0f}pt slide')
         return prs, slide, box
-    head, head_h, sub, box = new_deck_box(spec)
+    lay = new_deck_box(spec, getattr(a, 'subtitle', None))
     prs = Presentation()
     prs.slide_width, prs.slide_height = Pt(960), Pt(540)
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     from pptx.enum.text import PP_ALIGN
 
-    def line(s, top, size, bold, height):
-        tb = slide.shapes.add_textbox(Pt(48), Pt(top), Pt(864), Pt(height))
-        tb.text_frame.word_wrap = True
-        tb.text_frame.margin_left = tb.text_frame.margin_right = 0
-        p = tb.text_frame.paragraphs[0]
+    def run(p, text, size, bold, level=0.0):
         p.alignment = PP_ALIGN.LEFT
-        run = p.add_run()
-        run.text = s
-        run.font.size = Pt(size)
-        run.font.bold = bold
-    # The slide title is the claim (the finding as a sentence); the short title and the unit go under it.
-    if head:
-        line(' '.join(head), 32, 24, True, head_h)
-    if sub:
-        line(sub, 36 + head_h, 12, False, 20)
+        r = p.add_run()
+        r.text = text
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if level:
+            _ink(r.font.color, level, False)
+    # One text box holds the title block, so the subtitle follows the title where the title really ends: the
+    # line count is an estimate, the font of the machine decides. The slide title is the claim (the finding as a
+    # sentence); the subtitle (what the numbers are) goes under it.
+    block = [(' '.join(lay['head']), 24, True, 0.0)] if lay['head'] else []
+    if lay['subtitle']:
+        block.append((lay['subtitle'], SUB_FS, False, 0.35))
+    if block:
+        tb = slide.shapes.add_textbox(Pt(48), Pt(32), Pt(864), Pt(lay['box'][1] - TITLE_GAP - 32))
+        tb.name = 'Title'
+        tb.text_frame.word_wrap = True
+        tb.text_frame.margin_left = tb.text_frame.margin_right = tb.text_frame.margin_bottom = 0
+        # The block stands on the bottom of its box: the room between the subtitle and the chart stays the same
+        # when the title takes fewer or more lines than the estimate.
+        from pptx.enum.text import MSO_ANCHOR
+        tb.text_frame.vertical_anchor = MSO_ANCHOR.BOTTOM
+        for i, (text, size, bold, level) in enumerate(block):
+            p = tb.text_frame.paragraphs[0] if i == 0 else tb.text_frame.add_paragraph()
+            if i:
+                p.space_before = Pt(4)
+            run(p, text, size, bold, level)
     if spec.get('source'):
-        line(f"Source: {spec['source']}", 496, 9, False, 16)
-    return prs, slide, box
+        tb = slide.shapes.add_textbox(Pt(48), Pt(496), Pt(864), Pt(16))
+        tb.name = 'Source'
+        tb.text_frame.margin_left = tb.text_frame.margin_right = 0
+        run(tb.text_frame.paragraphs[0], f"Source: {spec['source']}", 9, False)
+    return prs, slide, lay['box']
 
 
 def main(argv=None):
@@ -432,7 +526,8 @@ def main(argv=None):
             raise SpecError('give --out')
         prs, slide, box = open_target(a, spec)
         dark = a.on == 'dark' if a.on else background_is_dark(prs, slide)
-        g = draw(slide, spec, box, a.accent, dark)
+        box = furnish(slide, box, a.subtitle if a.into else None, a.takeaway, dark, a.accent)
+        g = draw(slide, spec, box, a.accent, dark, frame='source' if a.into and a.subtitle else False)
         prs.save(a.out)
         print(json.dumps({'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1, 'box_pt': [round(v, 1) for v in box],
                           'used_height_pt': round(g['height'], 1), 'row_height_pt': round(g['rh'], 1),
