@@ -234,11 +234,77 @@ function callout(px, py, text, geo, own, ringOnly = false) {
 // missing callout. An annotation whose text equals the value label already drawn
 // on that point keeps only the ring. geo describes the plot for callout placement.
 function annotate(annotations, geo, locate) {
-  return annotations.map((a, i) => {
-    const pt = locate(a);
+  const taken = [];                                        // label boxes already in the callout band
+  const at = (a, i, index) => {
+    const pt = locate(index === undefined ? a : { ...a, index });
     if (!pt || !fin(pt[0]) || !fin(pt[1])) throw new RangeError(`annotation ${i} does not resolve to a point`);
+    return pt;
+  };
+  return annotations.map((a, i) => {
+    if (a.style && a.style !== 'ring') return styled(a, i, geo, at, taken);
+    const pt = at(a, i);
     return callout(pt[0], pt[1], a.text, geo, pt[2], pt[3] != null && String(a.text) === String(pt[3]));
   }).join('');
+}
+
+// ---------- callout styles that draw the eye harder than a ring ----------
+// box:   a dotted rectangle around the mark, a line, and the words in a box with a white ground
+// pill:  the words in a filled box, a line and a dot on the mark
+// delta: a bracket from one mark to another with the change in a bubble (the change in percent when no text is given)
+// span:  a dotted, tinted rectangle around the marks from one to another, with the words above it
+// event: a dotted vertical line at a period with the words in a box (line and area charts)
+// All stand in a band of 34px that the builder keeps above the plot, so the words never cover data.
+const CALL = 'var(--chart-callout,#1b4f91)';
+const CALLOUT_STYLES = ['ring', 'box', 'pill', 'delta', 'span', 'event'];
+const calloutRoom = list => (list || []).some(a => a.style && a.style !== 'ring') ? 34 : (list || []).length ? CALLOUT_ROW : 0;
+const styledRoom = list => (list || []).some(a => a.style && a.style !== 'ring') ? 34 : 0;
+function styled(a, i, geo, at, taken) {
+  const { W, plotTop, bottom } = geo, yc = plotTop - 21, bh = 22;          // the band: the label boxes are centred on yc
+  if (!CALLOUT_STYLES.includes(a.style)) throw new RangeError(`annotation ${i}: style must be one of ${CALLOUT_STYLES.join(', ')}`);
+  const mark = p => p[4] ?? { x: p[0] - 7, y: p[1] - 7, w: 14, h: 14 };
+  const topOf = p => Math.min(mark(p).y, p[2] ? p[2].y0 : Infinity) - 3;    // above the mark and its value label
+  const mid = p => mark(p).x + mark(p).w / 2;
+  const line = (x1, y1, x2, y2, extra = '') => `<line x1="${round2(x1)}" y1="${round2(y1)}" x2="${round2(x2)}" y2="${round2(y2)}" stroke="${CALL}" stroke-width="1.3"${extra}/>`;
+  // A label box in the band, centred near cx and moved clear of the labels already there and of the chart edges.
+  const label = (cx, text, { filled = false, round = false } = {}) => {
+    const w = Math.ceil(textW(text, 12) * 0.9) + 18;
+    let x = Math.min(Math.max(cx - w / 2, 4), W - 4 - w);
+    taken.forEach(t => { if (x < t[1] + 6 && x + w > t[0] - 6) x = cx < (t[0] + t[1]) / 2 ? t[0] - 6 - w : t[1] + 6; });
+    x = Math.min(Math.max(x, 4), W - 4 - w); taken.push([x, x + w]);
+    return { x, w, cx: x + w / 2, svg: `<rect x="${round2(x)}" y="${round2(yc - bh / 2)}" width="${w}" height="${bh}" rx="${round ? bh / 2 : 4}" fill="${filled ? CALL : PAPER}" stroke="${CALL}" stroke-width="1.3"/>` +
+      `<text x="${round2(x + w / 2)}" y="${round2(yc + 4)}" text-anchor="middle" font-size="12" font-weight="700" fill="${filled ? PAPER : CALL}">${esc(text)}</text>` };
+  };
+  if (a.style === 'box' || a.style === 'pill') {
+    const p = at(a, i), m = mark(p), top = topOf(p), lb = label(mid(p), a.text, { filled: a.style === 'pill' });
+    const around = a.style === 'box'
+      ? `<rect x="${round2(m.x - 4)}" y="${round2(top)}" width="${round2(m.w + 8)}" height="${round2(m.y + m.h - top + 3)}" rx="3" fill="none" stroke="${CALL}" stroke-width="1.4" stroke-dasharray="3 3"/>`
+      : `<rect x="${round2(mid(p) - 3)}" y="${round2(top - 3)}" width="6" height="6" rx="3" fill="${CALL}"/>`;
+    const x2 = Math.min(Math.max(lb.cx, m.x), m.x + m.w);
+    return around + line(lb.cx, yc + bh / 2, x2, top - (a.style === 'pill' ? 3 : 0)) + lb.svg;
+  }
+  if (a.style === 'event') {
+    const p = at(a, i), lb = label(p[0], a.text);
+    return line(p[0], yc + bh / 2, p[0], bottom, ' stroke-dasharray="3 3"') + lb.svg;
+  }
+  const f = a.fromIndex ?? a.from, t = a.toIndex ?? a.to;
+  if (!Number.isInteger(f) || !Number.isInteger(t) || f === t) throw new RangeError(`annotation ${i}: style ${a.style} needs "from" and "to", two different marks`);
+  const p1 = at(a, i, f), p2 = at(a, i, t);
+  if (a.style === 'span') {
+    const x0 = Math.min(mark(p1).x, mark(p2).x) - 7, x1 = Math.max(mark(p1).x + mark(p1).w, mark(p2).x + mark(p2).w) + 7, y0 = plotTop - 6;
+    const tw = textW(a.text, 12) * 0.9, end = x0 + 2 + tw > W - 4;
+    return `<rect x="${round2(x0)}" y="${round2(y0)}" width="${round2(x1 - x0)}" height="${round2(bottom + 3 - y0)}" rx="5" fill="${CALL}" fill-opacity=".07" stroke="${CALL}" stroke-width="1.4" stroke-dasharray="3 3"/>` +
+      `<text x="${round2(end ? x1 - 2 : x0 + 2)}" y="${round2(yc + 6)}" text-anchor="${end ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${CALL}">${esc(a.text)}</text>`;
+  }
+  // delta: a bracket over the two marks, an arrow head on the later one, the change in a bubble
+  let text = a.text;
+  if (text == null || text === '') {
+    if (!fin(p1[5]) || !fin(p2[5]) || p1[5] === 0) throw new RangeError(`annotation ${i}: give "text" for this delta: the chart cannot compute the change`);
+    const d = (p2[5] - p1[5]) / Math.abs(p1[5]) * 100;
+    text = (d < 0 ? '−' : '+') + Math.abs(d).toFixed(Math.abs(d) < 10 ? 1 : 0) + '%';
+  }
+  const xa = mid(p1), xb = mid(p2), lb = label((xa + xb) / 2, text, { round: true }), ya = topOf(p1), yb = topOf(p2) - 6;
+  return line(xa, ya, xa, yc) + line(xa, yc, xb, yc) + line(xb, yc, xb, yb) +
+    `<polygon fill="${CALL}" points="${round2(xb - 4.5)},${round2(yb - 1)} ${round2(xb + 4.5)},${round2(yb - 1)} ${round2(xb)},${round2(yb + 6)}"/>` + lb.svg;
 }
 
 const pick = (arr, i, what) => {
@@ -263,7 +329,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
   if (legend === 'right') entries.sort((a, b) => b.end - a.end);          // beside the plot, the order of the line ends
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 54, R = 16 + lg.right, Tp = 14 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom - lg.bottom;
+    const L = 54, R = 16 + lg.right, Tp = 14 + f.top + extraTop + lg.height + styledRoom(annotations), B = 34, H = height - f.bottom - lg.bottom;
     const ys = series.flatMap(s => s.points.map(p => p.y)).filter(fin);
     if (!ys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     let ymax = Math.max(...ys) * 1.1;
@@ -312,7 +378,7 @@ export function lineChart({ series = [], labels = [], label, width = 600, height
     g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
       const s = pick(series, a.series ?? 0, 'series'), x = pick(labels, a.index, 'index');
       const p = s.points.find(p => p.x === x);
-      return p && [X(a.index), Y(p.y), placedBox.get((a.series ?? 0) + ':' + a.index), placedText.get((a.series ?? 0) + ':' + a.index)];
+      return p && [X(a.index), Y(p.y), placedBox.get((a.series ?? 0) + ':' + a.index), placedText.get((a.series ?? 0) + ':' + a.index), null, p.y];
     });
     return lg.svg + g;
   };
@@ -330,7 +396,7 @@ export function barChart({ data = [], label, width = 600, height = 260,
     d.series != null ? groups.find(e => e.name === d.series).color : palette(i));
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 34, H = height - f.bottom - lg.bottom;
+    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height + styledRoom(annotations), B = 34, H = height - f.bottom - lg.bottom;
     const vals = data.map(d => d.value).filter(fin);
     if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     let ymax = Math.max(...vals, target != null && fin(target) ? target : 0) * 1.12;
@@ -355,7 +421,8 @@ export function barChart({ data = [], label, width = 600, height = 260,
     }
     g += annotate(annotations, { W, L, R, top: f.top, extraTop, title: f.titleBox, band, plotTop: Tp, bottom: H - B, avoid }, a => {
       const d = pick(data, a.index, 'index');
-      return [L + a.index * bw + bw * 0.5, Y(Math.max(0, d.value)), avoid[a.index], fmtY(d.value)];
+      const top = Y(Math.max(0, d.value));
+      return [L + a.index * bw + bw * 0.5, top, avoid[a.index], fmtY(d.value), { x: L + a.index * bw + bw * 0.16, y: top, w: bw * 0.68, h: Math.max(1, Math.abs(Y(d.value) - Y(0))) }, d.value];
     });
     return lg.svg + g;
   };
@@ -372,7 +439,7 @@ export function waterfall({ items = [], label, width = 600, height = 290, fmtY =
   const groups = seriesLegend(items, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 54, R = 10 + lg.right, Tp = 18 + f.top + extraTop + lg.height, B = 46, H = height - f.bottom - lg.bottom;
+    const L = 54, R = 10 + lg.right, Tp = 18 + f.top + extraTop + lg.height + styledRoom(annotations), B = 46, H = height - f.bottom - lg.bottom;
     const bars = []; let run = 0;
     for (const it of items) {
       if (it.total) { bars.push({ name: it.label, from: 0, to: it.value, kind: 'total', delta: it.value, it }); run = it.value; }
@@ -419,7 +486,7 @@ export function scatter({ groups = [], label, width = 600, height = 330,
   const entries = legend ? groups.map((gr, gi) => ({ name: gr.name, color: colorOf(gr, gi) })) : [], band = {}, W = width;
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 54, R = 16 + lg.right, Tp = 22 + f.top + extraTop + lg.height, B = 38, H = height - f.bottom - lg.bottom;
+    const L = 54, R = 16 + lg.right, Tp = 22 + f.top + extraTop + lg.height + styledRoom(annotations), B = 38, H = height - f.bottom - lg.bottom;
     const pts = groups.flatMap(g => g.points || []);
     if (!pts.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const xt = niceTicks(0, Math.max(...pts.map(p => p.x)) * 1.05), XM = xt[xt.length - 1] || 1;
@@ -455,7 +522,7 @@ export function divergingBars({ data = [], label, width = 600, height = 280, fmt
   const groups = seriesLegend(data, colors), entries = legend ? groups : [], band = {}, W = width;
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 20, H = height - f.bottom - lg.bottom;
+    const L = 54, R = 14 + lg.right, Tp = 16 + f.top + extraTop + lg.height + styledRoom(annotations), B = 20, H = height - f.bottom - lg.bottom;
     const vals = data.map(d => d.value).filter(fin);
     if (!vals.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const lo = Math.min(0, ...vals) * 1.12, hi = Math.max(0, ...vals) * 1.12;
@@ -502,7 +569,7 @@ export function dumbbell({ rows = [], label, width = 600, aLabel = 'A', bLabel =
     const deco = f.deco + lg.svg;
     // The label column is 150px; in a narrow chart it is as wide as the longest label, so the rows keep room.
     const L = W < 460 ? Math.min(150, Math.ceil(Math.max(0, ...rows.map(r => textW(r.label, 12)))) + 18) : 150;
-    const R = 20 + lg.right, Tp = 16 + f.top + extraTop + lg.height, B = 28, H = plotH + f.top + extraTop + lg.height, height = H + lg.bottom + f.bottom;
+    const R = 20 + lg.right, Tp = 16 + f.top + extraTop + lg.height + styledRoom(annotations), B = 28, H = plotH + f.top + extraTop + lg.height, height = H + lg.bottom + f.bottom;
     if (!vals.length) return svg(W, height, deco + axisText(W / 2, H / 2, 'middle', 'no data'), lab);
     const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05), xmax = ticks[ticks.length - 1] || 1, xmin = ticks[0];
     const X = v => L + (v - xmin) / (xmax - xmin) * (W - L - R);
@@ -536,7 +603,7 @@ export function stackedBars({ columns = [], keys = [], colors = [], label, width
   if (legend === 'right') entries.reverse();                              // beside the plot, the order of the stack
   const body = extraTop => {
     const lg = legendAt(legend, entries, W, f.top + extraTop, height - f.bottom);
-    const L = 44, R = 14 + lg.right, Tp = 14 + f.top + extraTop + lg.height, B = 30, H = height - f.bottom - lg.bottom;
+    const L = 44, R = 14 + lg.right, Tp = 14 + f.top + extraTop + lg.height + styledRoom(annotations), B = 30, H = height - f.bottom - lg.bottom;
     if (!columns.length || !keys.length) return lg.svg + axisText(W / 2, H / 2, 'middle', 'no data');
     const totals = columns.map(c => keys.reduce((a, k) => a + (c.parts[k] || 0), 0));
     const norm = columns.map((c, i) => totals[i] > 0 ? totals[i] : 1);
@@ -597,7 +664,7 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   // A callout stands on its row after the value, in bold: the row keeps room for it.
   annotations.forEach(a => pick(data, a.index, 'index'));
   const note = i => annotations.filter(a => a.index === i).map(a => a.text).join(' · ');
-  const side = keep => Math.max(0, ...data.map((d, i) => keep(d) ? textW(text(d), 12) + (note(i) ? textW(note(i), 12) + 16 : 0) : 0)) + 10;
+  const side = keep => Math.max(0, ...data.map((d, i) => keep(d) ? textW(text(d), 12) + (note(i) ? textW(note(i), 12) * 0.9 + 36 : 0) : 0)) + 10;
   const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = (hi - lo) || 1;
   const x0 = L + (lo < 0 ? side(d => d.value < 0) : 0), x1 = W - lg.right - side(d => d.value >= 0);
   const X = v => x0 + (v - lo) / span * (x1 - x0), zero = X(0);
@@ -611,14 +678,18 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
     g += axisText(L - 8, by + bh / 2 + 4, 'end', fit(d.label, L - 12), `fill="${INK}"`);
     g += `<rect x="${round2(bx)}" y="${round2(by)}" width="${round2(w)}" height="${bh}" rx="3" fill="${col}">` +
       `<title>${esc(d.label)}: ${esc(text(d))}</title></rect>`;
-    const gap = note(i) ? 10 : 6;                           // the value starts after the callout ring
+    const gap = 6;
     g += d.value < 0 ? axisText(bx - gap, by + bh / 2 + 4, 'end', text(d), `fill="${INK}" font-weight="600"`)
       : axisText(bx + w + gap, by + bh / 2 + 4, 'start', text(d), `fill="${INK}" font-weight="600"`);
     if (note(i)) {
       const tw = textW(text(d), 12), end = d.value < 0 ? bx : bx + w, dir = d.value < 0 ? -1 : 1, nx = end + dir * (gap + tw + 12);
-      g += `<circle cx="${round2(end)}" cy="${round2(by + bh / 2)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` +
-        `<line x1="${round2(nx - dir * 9)}" x2="${round2(nx - dir * 3)}" y1="${round2(by + bh / 2)}" y2="${round2(by + bh / 2)}" stroke="${INK}" stroke-width="1.2"/>` +
-        axisText(nx, by + bh / 2 + 4, dir < 0 ? 'end' : 'start', note(i), `fill="${INK}" font-weight="700"`);
+      // A dotted frame around the bar and its value, a short line, and the words in a box.
+      const fx0 = Math.min(bx, end + dir * (gap + tw + 3)) - 3, fx1 = Math.max(bx + w, end + dir * (gap + tw + 3)) + 3, bw2 = Math.ceil(textW(note(i), 12) * 0.9) + 16;
+      const lx = dir < 0 ? fx0 - 10 - bw2 : fx1 + 10;
+      g += `<rect x="${round2(fx0)}" y="${round2(by - 4)}" width="${round2(fx1 - fx0)}" height="${bh + 8}" rx="3" fill="none" stroke="${CALL}" stroke-width="1.4" stroke-dasharray="3 3"/>` +
+        `<line x1="${round2(dir < 0 ? fx0 : fx1)}" x2="${round2(dir < 0 ? fx0 - 10 : fx1 + 10)}" y1="${round2(by + bh / 2)}" y2="${round2(by + bh / 2)}" stroke="${CALL}" stroke-width="1.3"/>` +
+        `<rect x="${round2(lx)}" y="${round2(by + bh / 2 - 11)}" width="${bw2}" height="22" rx="4" fill="${PAPER}" stroke="${CALL}" stroke-width="1.3"/>` +
+        `<text x="${round2(lx + bw2 / 2)}" y="${round2(by + bh / 2 + 4)}" text-anchor="middle" font-size="12" font-weight="700" fill="${CALL}">${esc(note(i))}</text>`;
     }
   });
   return svg(W, height, f.deco + lg.svg + g, lab);
@@ -724,7 +795,7 @@ const nonNeg = (v, what) => { if (!fin(v) || v < 0) throw new RangeError(`${what
 export function groupedBars({ categories = [], series = [], label, width = 600, height = 260, fmtY = num,
   title, unit, source, legend = true, colors, valueLabels = true, annotations = [] } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'grouped bars', W = width;
-  const cal = annotations.length ? CALLOUT_ROW : 0;       // a row above the plot for a callout that has no room inside it
+  const cal = calloutRoom(annotations);                    // a band above the plot for the callouts
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const lg = legendAt(legend, legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top, height - f.bottom);
   const L = 54, R = 14 + lg.right, Tp = 16 + f.top + lg.height + cal, B = 34, H = height - f.bottom - lg.bottom;
@@ -748,7 +819,7 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
         g += axisText(x + (bw - 2) / 2, ly, 'middle', t, `font-size="10" font-weight="600" fill="${INK}"`);
         own = labelBox(x + (bw - 2) / 2, ly, t, 'middle', 10, 2); avoid.push(own);
       }
-      tops.set(i + ':' + si, [x + (bw - 2) / 2, y, own, own ? t : undefined]);
+      tops.set(i + ':' + si, [x + (bw - 2) / 2, y, own, own ? t : undefined, { x, y, w: bw - 2, h }, v]);
       avoid.push({ x0: x, x1: x + bw - 2, y0: y, y1: y + h, m: 2 });            // the words of a callout do not stand on a bar
     });
     g += axisText(L + i * gw + gw / 2, H - 12, 'middle', fit(c, gw - 2));
@@ -766,7 +837,7 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
 export function stackedArea({ labels = [], series = [], label, width = 600, height = 280, fmtY = num,
   title, unit, source, legend = true, colors, totalLabels = false, annotations = [] } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked area', W = width;
-  const cal = annotations.length ? CALLOUT_ROW : 0;
+  const cal = calloutRoom(annotations);
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [];
   if (legend === 'right') entries.reverse();                              // beside the plot, the order of the stack
@@ -1057,7 +1128,7 @@ export function pareto({ data = [], label, width = 600, height = 270, fmtY = num
   if (!data.length) return noData(W, height, f.deco, lab);
   data.forEach((d, i) => nonNeg(d.value, `pareto value ${i}`));
   const rows = [...data].sort((a, b) => b.value - a.value), total = rows.reduce((a, d) => a + d.value, 0) || 1;
-  const L = 54, R = 40, Tp = 16 + f.top + (annotations.length ? CALLOUT_ROW : 0), B = 34, ticks = niceTicks(0, rows[0].value * 1.12), ymax = ticks[ticks.length - 1] || 1;
+  const L = 54, R = 40, Tp = 16 + f.top + calloutRoom(annotations), B = 34, ticks = niceTicks(0, rows[0].value * 1.12), ymax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - v / ymax) * (H - Tp - B), P = p => Tp + (1 - p) * (H - Tp - B), bw = (W - L - R) / rows.length, col = color || palette(0);
   let g = gridY(ticks, L, R, W, Y, fmtY) + [0, 0.5, 1].map(p => axisText(W - R + 6, P(p) + 4, 'start', Math.round(p * 100) + '%')).join('');
   g += `<line x1="${L}" x2="${W - R}" y1="${round2(P(0.8))}" y2="${round2(P(0.8))}" stroke="${TGT}" stroke-width="1.2" stroke-dasharray="5 4"/>` + axisText(W - R + 6, P(0.8) + 4, 'start', '80%', `fill="${TGT}"`);
@@ -1287,8 +1358,16 @@ function callouts(what, spec) {
   if (list.length > 3) throw new RangeError(`${what}: ${list.length} callouts. A callout draws the eye to one point; with more than 3 nothing stands out. Keep the one the claim needs`);
   const [ats, series = []] = CALLOUT_AT[what]?.(spec) ?? [[], []];
   return list.map((a, i) => {
-    if (!a || !String(a.text ?? '').trim()) throw new RangeError(`${what}: callout ${i} needs "text"`);
-    const out = { ...a };
+    if (a && a.style != null && !CALLOUT_STYLES.includes(a.style)) throw new RangeError(`${what}: callout ${i}: "style" must be one of ${CALLOUT_STYLES.join(', ')}`);
+    if (!a || (!String(a.text ?? '').trim() && a.style !== 'delta')) throw new RangeError(`${what}: callout ${i} needs "text"`);
+    const out = { ...a, style: a.style ?? 'box' };          // in a spec the default callout is the box: a ring is easy to miss
+    for (const key of ['from', 'to']) if (a[key] != null) {
+      const k = ats.findIndex(x => String(x) === String(a[key]));
+      if (k < 0) throw new RangeError(`${what}: callout ${i}: "${key}" is "${a[key]}", which is not on the chart. The chart has: ${ats.join(', ')}`);
+      out[key + 'Index'] = k; delete out[key];
+    }
+    if ((a.style === 'delta' || a.style === 'span') && (out.fromIndex == null || out.toIndex == null)) throw new RangeError(`${what}: callout ${i}: style "${a.style}" needs "from" and "to"`);
+    if (a.style === 'event' && !['lineChart', 'stackedArea'].includes(what)) throw new RangeError(`${what}: style "event" marks a period on lineChart and stackedArea`);
     if (a.at != null) {
       const k = ats.findIndex(x => String(x) === String(a.at));
       if (k < 0) throw new RangeError(`${what}: callout "${a.text}" points at "${a.at}", which is not on the chart. The chart has: ${ats.join(', ')}`);

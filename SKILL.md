@@ -101,13 +101,33 @@ A callout draws the eye to the one data point that the claim rests on.
 |---|---|---|---|
 | `lineChart`, `stackedArea` | a period in `labels` | a series (`stackedArea`: the top edge of that series; the total when none is named) | the point |
 | `barChart`, `divergingBars`, `waterfall`, `pareto` | the label of a bar | | the end of the bar |
-| `hbarChart` | the label of a row | | the end of the bar; the words stand on the row, after the value |
+| `hbarChart` | the label of a row | | a dotted frame around the bar and its value; the words stand in a box on the row |
 | `groupedBars` | a category | a series | the top of that bar |
 | `stackedBars` | a column | a key | the top of that segment |
 | `dumbbell` | a row | `aLabel` or `bLabel` | that end of the row |
 | `scatter` | (give `x` and `y`) | | the coordinate |
 
-1. One callout per chart is the rule. Three is the limit; the code refuses a fourth.
+A callout has a `style`. All but `ring` stand in a band above the plot, so the words never cover data,
+and take the callout colour (`--chart-callout` on a page; a dark shade of the first series colour on a slide).
+
+| `style` | What it draws | Fields | Use for |
+|---|---|---|---|
+| `box` (the default in a spec) | a dotted frame around the mark, a line, the words in a white box with a coloured border | `at`, `series?`, `text` | the one bar or point the claim rests on |
+| `pill` | the words in a filled box, a line and a dot on the mark | `at`, `series?`, `text` | the same, louder; use one per slide |
+| `delta` | a bracket from one mark to another, an arrow head, the change in a bubble | `from`, `to`, `series?`, `text?` (the change in percent when left out) | the difference between two bars or two points |
+| `span` | a dotted, tinted frame around the marks from one to another, the words above it | `from`, `to`, `text` | a group of bars or a run of periods |
+| `event` | a dotted vertical line at a period, the words in a box (`lineChart`, `stackedArea`) | `at`, `text` | a date that explains a change: a launch, a price change |
+| `ring` | a small ring on the point and bold words beside it | `at`, `series?`, `text` | a dense chart with no room above the plot |
+
+```json
+"annotations": [
+  { "at": "Search", "text": "27% above Direct" },
+  { "from": "Direct", "to": "Search", "style": "delta" },
+  { "from": "Email", "to": "Referral", "text": "Two channels under 700 orders", "style": "span" }
+]
+```
+
+1. One callout per chart is the rule, two cues per slide at most. Three per chart is the limit; the code refuses a fourth.
 2. The words say why the point matters ("highest quarter", "release"), in five words at most. Do not write
    the value again when the chart already shows it.
 3. Point at data the claim or the section header names. A callout on another point pulls the reader away.

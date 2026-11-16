@@ -78,7 +78,7 @@ def parse_color(css):
         return None
     m = VAR.fullmatch(css)
     if m:
-        if m.group(1) in ACCENTS or m.group(1) in INK_LEVEL or m.group(1) in ('up', 'down', 'target', 'paper'):
+        if m.group(1) in ACCENTS or m.group(1) in INK_LEVEL or m.group(1) in ('up', 'down', 'target', 'paper', 'callout'):
             return ('role', m.group(1))
         if m.group(2):
             return parse_color(m.group(2))
@@ -185,6 +185,15 @@ class Canvas:
                 color.rgb = RGBColor.from_string(self.palette[i])
             else:
                 color.theme_color = getattr(MSO_THEME_COLOR, f'ACCENT_{v}')
+        elif v == 'callout':
+            # Callouts take the first series colour, darker on a light slide and lighter on a dark one.
+            if self.palette:
+                r, g, b = (int(self.palette[0][i:i + 2], 16) for i in (0, 2, 4))
+                k = (lambda c: round(c + (255 - c) * 0.45)) if self.dark else (lambda c: round(c * 0.68))
+                color.rgb = RGBColor(k(r), k(g), k(b))
+            else:
+                color.theme_color = MSO_THEME_COLOR.ACCENT_1
+                color.brightness = 0.4 if self.dark else -0.3
         elif v == 'target':
             color.rgb = RGBColor.from_string('C0392B')
         elif v == 'paper':
