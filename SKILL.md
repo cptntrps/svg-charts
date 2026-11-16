@@ -233,7 +233,7 @@ Each line of text on a slide has one job. Do not mix them:
 | Slide subtitle | about the slide: the scope, the period, the premise. It also keeps the charts off the title | "All regions; the first half of 2026 against the first half of 2025" |
 | Section header | one per chart on a shared slide: a numbered comment that the chart under it proves | "① The Team plan passed the Free plan in May" |
 | Chart title | always about the data on the chart: the measure, by what, when, and the unit. Never a comment | "Revenue 2025 versus revenue 2026 · USD million" |
-| Takeaway | the bottom line of the slide: what the reader must conclude or do | "Move the support budget to the Team plan" |
+| Takeaway | the bottom line of the slide: what the reader must conclude or do. A light band over the width, the words bold and centred | "Move the support budget to the Team plan" |
 
 ```sh
 python3 deck/chart.py spec.json --out slide.pptx --subtitle "All regions, January to June 2026" --takeaway "Move the support budget to the release team"
