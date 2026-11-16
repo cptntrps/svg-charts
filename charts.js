@@ -117,7 +117,7 @@ const pickColor = (explicit, colors, names, fallback) =>
 // Legend rows under the title band: per entry a 14x3 swatch (or a hollow/filled
 // marker) in the entry colour and its name in 12px axis text, wrapped to the
 // chart width. Returns the svg and the height the plot gives up.
-const LEGEND_ROW = 16;
+const LEGEND_ROW = 16, CALLOUT_ROW = 18;
 const legendEntry = (e, x, y) =>
   (e.marker === 'hollow' ? `<circle cx="${round2(x + 7)}" cy="${round2(y + 8)}" r="4" fill="var(--chart-paper,#fff)" stroke="${e.color}" stroke-width="2"/>`
     : e.marker === 'filled' ? `<circle cx="${round2(x + 7)}" cy="${round2(y + 8)}" r="4" fill="${e.color}"/>`
@@ -577,7 +577,7 @@ function fit(s, px, fs = 12) {
 // Values must be zero or more, unless `diverging: true`: then bars grow left and right from a zero line
 // (signed change per category), coloured by sign (--chart-up, --chart-down) with signed value labels.
 export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY = num,
-  title, unit, source, legend = false, colors, highlight = null, diverging = false } = {}) {
+  title, unit, source, legend = false, colors, highlight = null, diverging = false, annotations = [] } = {}) {
   const lab = label ?? title ?? 'bar chart', W = width;
   const groups = seriesLegend(data, colors), entries = legend ? groups : [];
   const bandTop = topBand(title, unit, width);
@@ -594,7 +594,10 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
   if (highlight) highlight.forEach(i => pick(data, i, 'highlight'));
   const L = Math.min(Math.ceil(Math.max(...data.map(d => textW(d.label, 12)))) + 12, Math.round(W * 0.42));
   const text = d => diverging ? (d.value < 0 ? '−' : '+') + fmtY(Math.abs(d.value)) : fmtY(d.value);
-  const side = keep => Math.max(0, ...data.filter(keep).map(d => textW(text(d), 12))) + 10;
+  // A callout stands on its row after the value, in bold: the row keeps room for it.
+  annotations.forEach(a => pick(data, a.index, 'index'));
+  const note = i => annotations.filter(a => a.index === i).map(a => a.text).join(' · ');
+  const side = keep => Math.max(0, ...data.map((d, i) => keep(d) ? textW(text(d), 12) + (note(i) ? textW(note(i), 12) + 16 : 0) : 0)) + 10;
   const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = (hi - lo) || 1;
   const x0 = L + (lo < 0 ? side(d => d.value < 0) : 0), x1 = W - lg.right - side(d => d.value >= 0);
   const X = v => x0 + (v - lo) / span * (x1 - x0), zero = X(0);
@@ -608,8 +611,15 @@ export function hbarChart({ data = [], label, width = 600, rowHeight = 28, fmtY 
     g += axisText(L - 8, by + bh / 2 + 4, 'end', fit(d.label, L - 12), `fill="${INK}"`);
     g += `<rect x="${round2(bx)}" y="${round2(by)}" width="${round2(w)}" height="${bh}" rx="3" fill="${col}">` +
       `<title>${esc(d.label)}: ${esc(text(d))}</title></rect>`;
-    g += d.value < 0 ? axisText(bx - 6, by + bh / 2 + 4, 'end', text(d), `fill="${INK}" font-weight="600"`)
-      : axisText(bx + w + 6, by + bh / 2 + 4, 'start', text(d), `fill="${INK}" font-weight="600"`);
+    const gap = note(i) ? 10 : 6;                           // the value starts after the callout ring
+    g += d.value < 0 ? axisText(bx - gap, by + bh / 2 + 4, 'end', text(d), `fill="${INK}" font-weight="600"`)
+      : axisText(bx + w + gap, by + bh / 2 + 4, 'start', text(d), `fill="${INK}" font-weight="600"`);
+    if (note(i)) {
+      const tw = textW(text(d), 12), end = d.value < 0 ? bx : bx + w, dir = d.value < 0 ? -1 : 1, nx = end + dir * (gap + tw + 12);
+      g += `<circle cx="${round2(end)}" cy="${round2(by + bh / 2)}" r="5" fill="none" stroke="${INK}" stroke-width="1.5"/>` +
+        `<line x1="${round2(nx - dir * 9)}" x2="${round2(nx - dir * 3)}" y1="${round2(by + bh / 2)}" y2="${round2(by + bh / 2)}" stroke="${INK}" stroke-width="1.2"/>` +
+        axisText(nx, by + bh / 2 + 4, dir < 0 ? 'end' : 'start', note(i), `fill="${INK}" font-weight="700"`);
+    }
   });
   return svg(W, height, f.deco + lg.svg + g, lab);
 }
@@ -712,17 +722,19 @@ const nonNeg = (v, what) => { if (!fin(v) || v < 0) throw new RangeError(`${what
 // ---------- grouped bars (two or three series side by side per category) ----------
 // categories: [name, ...]; series: [{ name, color?, values: [number per category] }]
 export function groupedBars({ categories = [], series = [], label, width = 600, height = 260, fmtY = num,
-  title, unit, source, legend = true, colors, valueLabels = true } = {}) {
+  title, unit, source, legend = true, colors, valueLabels = true, annotations = [] } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'grouped bars', W = width;
+  const cal = annotations.length ? CALLOUT_ROW : 0;       // a row above the plot for a callout that has no room inside it
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const lg = legendAt(legend, legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [], W, f.top, height - f.bottom);
-  const L = 54, R = 14 + lg.right, Tp = 16 + f.top + lg.height, B = 34, H = height - f.bottom - lg.bottom;
+  const L = 54, R = 14 + lg.right, Tp = 16 + f.top + lg.height + cal, B = 34, H = height - f.bottom - lg.bottom;
   const vals = series.flatMap(s => s.values || []).filter(v => v != null);
   if (!vals.length || !categories.length) return noData(W, height, f.deco + lg.svg, lab);
   vals.forEach((v, i) => nonNeg(v, `groupedBars value ${i}`));
   const ticks = niceTicks(0, Math.max(...vals) * 1.12), ymax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - v / ymax) * (H - Tp - B), gw = (W - L - R) / categories.length, bw = gw * 0.78 / series.length;
   let g = gridY(ticks, L, R, W, Y, fmtY);
+  const avoid = [], tops = new Map();                       // bar tops and value labels, for the callouts
   categories.forEach((c, i) => {
     const x0 = L + i * gw + gw * 0.11;
     series.forEach((s, si) => {
@@ -730,9 +742,19 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
       const x = x0 + si * bw, y = Y(v), h = Math.max(1, Y(0) - y), t = fmtY(v);
       g += `<rect x="${round2(x)}" y="${round2(y)}" width="${round2(Math.max(1, bw - 2))}" height="${round2(h)}" rx="2.5" fill="${colorOf(s, si)}">` +
         `<title>${esc(c)} ${esc(s.name)}: ${esc(t)}</title></rect>`;
-      if (valueLabels && textW(t, 10) <= bw + 2) g += axisText(x + (bw - 2) / 2, y - 4, 'middle', t, `font-size="10" font-weight="600" fill="${INK}"`);
+      let own;
+      if (valueLabels && textW(t, 10) <= bw + 2) {
+        const ly = y - (annotations.some(a => a.index === i && (a.series ?? 0) === si) ? 9 : 4);   // clear of the callout ring
+        g += axisText(x + (bw - 2) / 2, ly, 'middle', t, `font-size="10" font-weight="600" fill="${INK}"`);
+        own = labelBox(x + (bw - 2) / 2, ly, t, 'middle', 10, 2); avoid.push(own);
+      }
+      tops.set(i + ':' + si, [x + (bw - 2) / 2, y, own, own ? t : undefined]);
     });
     g += axisText(L + i * gw + gw / 2, H - 12, 'middle', fit(c, gw - 2));
+  });
+  g += annotate(annotations, { W, L, R, top: 0, plotTop: Tp, bottom: H - B, avoid }, a => {
+    pick(categories, a.index, 'index'); pick(series, a.series ?? 0, 'series');
+    return tops.get(a.index + ':' + (a.series ?? 0));
   });
   return svg(W, height, f.deco + lg.svg + g, lab);
 }
@@ -741,31 +763,39 @@ export function groupedBars({ categories = [], series = [], label, width = 600, 
 // labels: [x, ...]; series: [{ name, color?, values: [number per label] }], drawn bottom to top in the order given.
 // `totalLabels: true` writes the total above the first and the last period, for a claim that names them.
 export function stackedArea({ labels = [], series = [], label, width = 600, height = 280, fmtY = num,
-  title, unit, source, legend = true, colors, totalLabels = false } = {}) {
+  title, unit, source, legend = true, colors, totalLabels = false, annotations = [] } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'stacked area', W = width;
+  const cal = annotations.length ? CALLOUT_ROW : 0;
   const colorOf = (s, si) => pickColor(s.color, colors, [s.name], palette(si));
   const entries = legend ? series.map((s, si) => ({ name: s.name, color: colorOf(s, si) })) : [];
   if (legend === 'right') entries.reverse();                              // beside the plot, the order of the stack
   const lg = legendAt(legend, entries, W, f.top, height - f.bottom);
-  const L = 54, R = 16 + lg.right, Tp = 14 + f.top + lg.height, B = 34, H = height - f.bottom - lg.bottom;
+  const L = 54, R = 16 + lg.right, Tp = 14 + f.top + lg.height + cal, B = 34, H = height - f.bottom - lg.bottom;
   if (labels.length < 2 || !series.length) return noData(W, height, f.deco + lg.svg, lab);
   series.forEach((s, si) => labels.forEach((_, i) => nonNeg(s.values[i] ?? 0, `stackedArea series ${si} value ${i}`)));
   const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] ?? 0), 0));
   const ticks = niceTicks(0, Math.max(...totals) * 1.08), ymax = ticks[ticks.length - 1] || 1;
   const X = i => L + i * (W - L - R) / (labels.length - 1), Y = v => Tp + (1 - v / ymax) * (H - Tp - B);
   let g = gridY(ticks, L, R, W, Y, fmtY), base = labels.map(() => 0);
-  const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72))));
+  const every = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((W - L - R) / 72)))), edges = [], avoid = [];
   series.forEach((s, si) => {
     const top = base.map((b, i) => b + (s.values[i] ?? 0)), col = colorOf(s, si);
     const up = top.map((v, i) => round2(X(i)) + ',' + round2(Y(v))), down = base.map((v, i) => round2(X(i)) + ',' + round2(Y(v))).reverse();
     g += `<polygon fill="${col}" fill-opacity=".78" points="${up.join(' ')} ${down.join(' ')}"><title>${esc(s.name)}</title></polygon>` +
       `<polyline fill="none" stroke="${col}" stroke-width="1.6" points="${up.join(' ')}"/>`;
-    base = top;
+    edges.push(top); base = top;
   });
   g += labels.map((x, i) => (i % every === 0 || i === labels.length - 1)
     ? axisText(X(i), H - 12, i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle', x) : '').join('');
   if (totalLabels) [0, labels.length - 1].forEach(i => {
     g += axisText(X(i), Y(totals[i]) - 6, i ? 'end' : 'start', fmtY(totals[i]), `fill="${INK}" font-weight="700" font-size="11"`);
+    avoid.push(labelBox(X(i), Y(totals[i]) - 6, fmtY(totals[i]), i ? 'end' : 'start', 11, 2));
+  });
+  // A callout points at the top edge of a series at a period: the last series (the total) when none is named.
+  for (let i = 1; i < labels.length; i++) avoid.push(segment(X(i - 1), Y(totals[i - 1]), X(i), Y(totals[i])));
+  g += annotate(annotations, { W, L, R, top: 0, plotTop: Tp, bottom: H - B, avoid }, a => {
+    pick(labels, a.index, 'index'); const si = a.series ?? series.length - 1; pick(series, si, 'series');
+    return [X(a.index), Y(edges[si][a.index])];
   });
   return svg(W, height, f.deco + lg.svg + g, lab);
 }
@@ -1021,12 +1051,12 @@ export function gauge({ value, max, target = null, caption = null, label, width 
 
 // ---------- pareto (ranked bars with the running share: which few items make most of the total) ----------
 // data: [{ label, value }]; sorted here from the largest. The line is the cumulative share; a rule marks 80%.
-export function pareto({ data = [], label, width = 600, height = 270, fmtY = num, title, unit, source, color } = {}) {
+export function pareto({ data = [], label, width = 600, height = 270, fmtY = num, title, unit, source, color, annotations = [] } = {}) {
   const f = frame({ title, unit, source, H: height , W: width }), lab = label ?? title ?? 'pareto', W = width, H = height - f.bottom;
   if (!data.length) return noData(W, height, f.deco, lab);
   data.forEach((d, i) => nonNeg(d.value, `pareto value ${i}`));
   const rows = [...data].sort((a, b) => b.value - a.value), total = rows.reduce((a, d) => a + d.value, 0) || 1;
-  const L = 54, R = 40, Tp = 16 + f.top, B = 34, ticks = niceTicks(0, rows[0].value * 1.12), ymax = ticks[ticks.length - 1] || 1;
+  const L = 54, R = 40, Tp = 16 + f.top + (annotations.length ? CALLOUT_ROW : 0), B = 34, ticks = niceTicks(0, rows[0].value * 1.12), ymax = ticks[ticks.length - 1] || 1;
   const Y = v => Tp + (1 - v / ymax) * (H - Tp - B), P = p => Tp + (1 - p) * (H - Tp - B), bw = (W - L - R) / rows.length, col = color || palette(0);
   let g = gridY(ticks, L, R, W, Y, fmtY) + [0, 0.5, 1].map(p => axisText(W - R + 6, P(p) + 4, 'start', Math.round(p * 100) + '%')).join('');
   g += `<line x1="${L}" x2="${W - R}" y1="${round2(P(0.8))}" y2="${round2(P(0.8))}" stroke="${TGT}" stroke-width="1.2" stroke-dasharray="5 4"/>` + axisText(W - R + 6, P(0.8) + 4, 'start', '80%', `fill="${TGT}"`);
@@ -1038,6 +1068,12 @@ export function pareto({ data = [], label, width = 600, height = 270, fmtY = num
   });
   g += `<polyline fill="none" stroke="${INK}" stroke-width="2" points="${pts.map(p => round2(p[0]) + ',' + round2(p[1])).join(' ')}"/>` +
     pts.map(p => `<circle cx="${round2(p[0])}" cy="${round2(p[1])}" r="3" fill="${INK}"/>`).join('');
+  // A callout points at the top of a bar; `index` counts the bars as drawn, from the largest.
+  const avoid = pts.slice(1).map((p, i) => segment(pts[i][0], pts[i][1], p[0], p[1], 6));
+  g += annotate(annotations, { W, L, R, top: 0, plotTop: Tp, bottom: H - B, avoid }, a => {
+    const d = pick(rows, a.index, 'index');
+    return [L + a.index * bw + bw * 0.5, Y(d.value)];
+  });
   return svg(W, height, f.deco + g, lab);
 }
 
@@ -1181,12 +1217,12 @@ export const chartTypes = {
   divergingBars: { fn: divergingBars, keys: ['data', 'annotations', 'legend', 'colors'], height: true },
   dumbbell: { fn: dumbbell, keys: ['rows', 'aLabel', 'bLabel', 'annotations', 'legend', 'colors'] },
   stackedBars: { fn: stackedBars, keys: ['columns', 'keys', 'colors', 'annotations', 'legend'], height: true, noFormat: 'stackedBars shows each part as a percentage of its column' },
-  hbarChart: { fn: hbarChart, keys: ['data', 'rowHeight', 'legend', 'colors', 'highlight', 'diverging'], rows: rowsFit('rowHeight', 20, 40) },
+  hbarChart: { fn: hbarChart, keys: ['data', 'rowHeight', 'legend', 'colors', 'highlight', 'diverging', 'annotations'], rows: rowsFit('rowHeight', 20, 40) },
   donut: { fn: donut, keys: ['slices', 'colors', 'centerValue', 'centerLabel'], height: true },
   heatmap: { fn: heatmap, keys: ['rows', 'cols', 'cells', 'cellHeight', 'color', 'cellLabels'], rows: rowsFit('cellHeight', 18, 44) },
   sparkline: { fn: sparkline, keys: ['values', 'color'], height: true, noFrame: true },
-  groupedBars: { fn: groupedBars, keys: ['categories', 'series', 'legend', 'colors', 'valueLabels'], height: true },
-  stackedArea: { fn: stackedArea, keys: ['labels', 'series', 'legend', 'colors', 'totalLabels'], height: true },
+  groupedBars: { fn: groupedBars, keys: ['categories', 'series', 'legend', 'colors', 'valueLabels', 'annotations'], height: true },
+  stackedArea: { fn: stackedArea, keys: ['labels', 'series', 'legend', 'colors', 'totalLabels', 'annotations'], height: true },
   slope: { fn: slope, keys: ['rows', 'aLabel', 'bLabel', 'colors'], height: true },
   bullet: { fn: bullet, keys: ['rows', 'rowHeight', 'colors', 'overColor'], rows: rowsFit('rowHeight', 34, 56) },
   histogram: { fn: histogram, keys: ['values', 'bins', 'color', 'mark'], height: true, fmtX: true },
@@ -1196,7 +1232,7 @@ export const chartTypes = {
   funnel: { fn: funnel, keys: ['stages', 'rowHeight', 'color'], rows: rowsFit('rowHeight', 36, 60) },
   sankey: { fn: sankey, keys: ['flows', 'colors'], height: true },
   gauge: { fn: gauge, keys: ['value', 'max', 'target', 'caption', 'color'], height: true },
-  pareto: { fn: pareto, keys: ['data', 'color'], height: true },
+  pareto: { fn: pareto, keys: ['data', 'color', 'annotations'], height: true },
   wordCloud: { fn: wordCloud, keys: ['words', 'minSize', 'maxSize', 'colors'], height: true },
   rankedTable: { fn: rankedTable, keys: ['rows', 'columns', 'valueLabel', 'total', 'change', 'sort', 'highlight', 'rowHeight', 'colors'], ownFormat: true },
 };
@@ -1229,6 +1265,40 @@ const SLOTS = {
   divergingBars: s => [(s.data || []).map(d => d.label), 11, 54 + 14],
   waterfall: s => [(s.items || []).flatMap(d => { const w = String(d.label).split(' '); return [w[0], w.slice(1).join(' ')]; }), 0, 54 + 10],
 };
+// A callout names its data point: `at` is the label of the item or the period, `series` the name of the series.
+// Per chart type: the labels `at` is looked up in, and the series names.
+const names = list => (list || []).map(d => d.label);
+const CALLOUT_AT = {
+  lineChart: s => [s.labels || [], (s.series || []).map(x => x.name)],
+  stackedArea: s => [s.labels || [], (s.series || []).map(x => x.name)],
+  groupedBars: s => [s.categories || [], (s.series || []).map(x => x.name)],
+  stackedBars: s => [names(s.columns), s.keys || []],
+  barChart: s => [names(s.data)], divergingBars: s => [names(s.data)], hbarChart: s => [names(s.data)],
+  waterfall: s => [names(s.items)],
+  pareto: s => [names([...(s.data || [])].sort((a, b) => b.value - a.value))],
+  dumbbell: s => [names(s.rows), [s.aLabel ?? 'A', s.bLabel ?? 'B']],
+};
+function callouts(what, spec) {
+  const list = spec.annotations;
+  if (!Array.isArray(list)) throw new RangeError(`${what}: "annotations" is a list of callouts: [{ "at": "<label>", "text": "<a few words>" }]`);
+  if (list.length > 3) throw new RangeError(`${what}: ${list.length} callouts. A callout draws the eye to one point; with more than 3 nothing stands out. Keep the one the claim needs`);
+  const [ats, series = []] = CALLOUT_AT[what]?.(spec) ?? [[], []];
+  return list.map((a, i) => {
+    if (!a || !String(a.text ?? '').trim()) throw new RangeError(`${what}: callout ${i} needs "text"`);
+    const out = { ...a };
+    if (a.at != null) {
+      const k = ats.findIndex(x => String(x) === String(a.at));
+      if (k < 0) throw new RangeError(`${what}: callout "${a.text}" points at "${a.at}", which is not on the chart. The chart has: ${ats.join(', ')}`);
+      out.index = k; delete out.at;
+    }
+    if (typeof a.series === 'string') {
+      const k = series.findIndex(x => String(x) === a.series);
+      if (k < 0) throw new RangeError(`${what}: callout "${a.text}" names the series "${a.series}", which is not on the chart. The chart has: ${series.join(', ')}`);
+      out.series = k;
+    }
+    return out;
+  });
+}
 const svgHeight = out => +out.match(/viewBox="0 0 [\d.]+ ([\d.]+)"/)[1];
 
 export function chart(spec, { width, height, strict = false, bare = false } = {}) {
@@ -1252,6 +1322,7 @@ export function chart(spec, { width, height, strict = false, bare = false } = {}
   if (type.ownFormat) { if (spec.format) o.format = spec.format; }
   else if (spec.format) o.fmtY = formatter(spec.format);
   if (spec.formatX) o.fmtX = formatter(spec.formatX);
+  if (spec.annotations !== undefined) o.annotations = callouts(what, spec);
   if (what === 'scatter') o.groups = (spec.groups || []).map((g, gi) => {
     if (!g.line) return g;
     let { from, to, slope: m, intercept: b } = g.line;

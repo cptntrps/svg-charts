@@ -11,5 +11,8 @@
   { "label": "Corner market", "value": 2380 },
   { "label": "Online", "value": 1675 },
   { "label": "Bakery", "value": 310 }
+ ],
+ "annotations": [
+  { "at": "Warehouse club", "text": "49% of the spend" }
  ]
 }

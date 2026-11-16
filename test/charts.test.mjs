@@ -633,3 +633,30 @@ test('chart: the title says what the chart shows, the claim has the finding', ()
   assert.throws(() => charts.chart({ ...spec, title: 'Orders by channel rose in every region and Search now brings the most of them, by far' }), /the limit is 80/);
   for (const [file, s] of examples) if (s.title) assert.ok(s.title.length <= 80 && s.title !== s.claim, file);
 });
+
+test('callouts: a callout names its point by label and series name', () => {
+  const ex = n => examples.find(([, s]) => s.chart === n)[1];
+  const ring = s => { const m = s.match(/<circle cx="([\d.]+)" cy="([\d.]+)" r="5" fill="none"/); return m && [+m[1], +m[2]]; };
+  const bars = charts.chart(ex('groupedBars'), { width: 864, height: 360, strict: true });
+  const bar = bars.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"[^>]*><title>Q4 This year: \$248k<\/title>/);
+  assert.ok(Math.abs(ring(bars)[0] - (+bar[1] + +bar[3] / 2)) < 1 && Math.abs(ring(bars)[1] - +bar[2]) < 1, 'the ring sits on the top of the named bar');
+  assert.ok(bars.includes('>below last year</text>'));
+  const area = charts.chart({ ...ex('stackedArea'), annotations: [{ at: 'May', series: 'Food', text: 'dip' }] }, { width: 864, height: 360, strict: true });
+  assert.ok(ring(area) && area.includes('>dip</text>'));
+  const par = charts.chart({ ...ex('pareto'), annotations: [{ at: 'Beef', text: 'third' }] }, { width: 864, height: 360, strict: true });
+  const beef = par.match(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)"[^>]*><title>Beef:/);
+  assert.ok(Math.abs(ring(par)[0] - (+beef[1] + +beef[3] / 2)) < 1, 'pareto: the named bar, in the sorted order');
+  const hb = charts.chart(ex('hbarChart'), { width: 864, height: 300, strict: true });
+  const text = hb.match(/<text x="([\d.]+)"[^>]*font-weight="700">49% of the spend<\/text>/);
+  assert.ok(text && +text[1] < 864, 'hbarChart: the callout stands on the row, inside the chart');
+  assert.equal(charts.chart({ ...ex('lineChart'), annotations: [{ at: 'Mar', text: 'release' }] }), charts.chart({ ...ex('lineChart'), annotations: [{ index: 2, text: 'release' }] }));
+});
+
+test('callouts: a point that is not on the chart, or too many callouts, is refused', () => {
+  const spec = examples.find(([, s]) => s.chart === 'barChart')[1];
+  assert.throws(() => charts.chart({ ...spec, annotations: [{ at: 'Nowhere', text: 'x' }] }), /is not on the chart. The chart has: Search, Direct/);
+  assert.throws(() => charts.chart({ ...examples.find(([, s]) => s.chart === 'lineChart')[1], annotations: [{ at: 'Mar', series: 'Nobody', text: 'x' }] }), /names the series "Nobody"/);
+  assert.throws(() => charts.chart({ ...spec, annotations: ['Search', 'Direct', 'Social', 'Email'].map(at => ({ at, text: 'x' })) }), /4 callouts/);
+  assert.throws(() => charts.chart({ ...spec, annotations: [{ at: 'Search' }] }), /needs "text"/);
+  assert.throws(() => charts.chart({ ...examples.find(([, s]) => s.chart === 'donut')[1], annotations: [{ at: 'Produce', text: 'x' }] }), /donut does not take "annotations"/);
+});

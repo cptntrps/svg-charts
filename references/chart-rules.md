@@ -24,7 +24,7 @@ Patterns: [heatmap](#heatmap) · [calendar](#calendar) · [wordCloud](#wordcloud
 
 Use for the amount of 3 to 8 categories with short names. Example: `examples/bar-chart.json`.
 
-Spec: `data: [{ label, value, series? }]`, `target?`, `annotations?: [{ index, text }]`, `legend?`, `colors?`.
+Spec: `data: [{ label, value, series? }]`, `target?`, `annotations?: [{ at, text }]`, `legend?`, `colors?`.
 
 1. Give every item the same `series` name. The bars then share one colour. Without it each bar takes
    its own colour, and a colour that means nothing makes the reader search for a meaning.
@@ -39,7 +39,7 @@ Spec: `data: [{ label, value, series? }]`, `target?`, `annotations?: [{ index, t
 Use for ranked categories, long labels, or a narrow page. The height follows the rows.
 Example: `examples/hbar-chart.json`.
 
-Spec: `data: [{ label, value, series? }]`, `highlight?: [row position]`, `diverging?`, `rowHeight?`, `legend?`, `colors?`.
+Spec: `data: [{ label, value, series? }]`, `highlight?: [row position]`, `annotations?: [{ at, text }]`, `diverging?`, `rowHeight?`, `legend?`, `colors?`.
 
 1. Sort the data yourself, from the largest. The builder keeps the order you give.
 2. Put "Other" last, also when it is not the smallest.
@@ -55,7 +55,7 @@ Spec: `data: [{ label, value, series? }]`, `highlight?: [row position]`, `diverg
 Use to compare 2 to 4 series inside each category (this year against last year per quarter).
 Example: `examples/grouped-bars.json`.
 
-Spec: `categories: [...]`, `series: [{ name, values: [one per category] }]`, `legend?` (on), `valueLabels?` (on), `colors?`.
+Spec: `categories: [...]`, `series: [{ name, values: [one per category] }]`, `annotations?: [{ at, series, text }]`, `legend?` (on), `valueLabels?` (on), `colors?`.
 
 1. The comparison the reader makes is inside a category. When the question is the trend of each series,
    use `lineChart`.
@@ -110,7 +110,7 @@ note that does not fit, more rows than the box holds at 20pt per row, or bars un
 Use to show that a few items make most of a total. The builder sorts the bars and draws the running share
 with a rule at 80%. Example: `examples/pareto.json`.
 
-Spec: `data: [{ label, value }]`, `color?`.
+Spec: `data: [{ label, value }]`, `annotations?: [{ at, text }]`, `color?`.
 
 1. Use it only when the items are parts of one total and the claim is about concentration.
 2. Ten bars at most. Join the tail as one item and name it for what it holds ("Rest", "42 other items").
@@ -143,7 +143,7 @@ Spec: `value`, `max`, `target?`, `caption?`, `color?`.
 Use for a value across four or more ordered periods. Example: `examples/line-chart.json`.
 
 Spec: `labels: [the periods in order]`, `series: [{ name, points: [{ x, y }], dash? }]`, `target?`, `area?`,
-`valueLabels?`, `annotations?: [{ index, series?, text }]`, `legend?`, `colors?`.
+`valueLabels?`, `annotations?: [{ at, series?, text }]`, `legend?`, `colors?`.
 
 1. `labels` holds every period, at equal steps. A period without a value is left out of `points`; the line
    then joins its neighbours, so say in the claim or in a callout that the period is missing.
@@ -239,7 +239,7 @@ Spec: `columns: [{ label, parts: { key: value } }]`, `keys: [the stack order]`, 
 
 Use for how a total and its parts move over time. Example: `examples/stacked-area.json`.
 
-Spec: `labels: [the periods in order]`, `series: [{ name, values: [one per label] }]`, `totalLabels?`, `legend?` (on), `colors?`.
+Spec: `labels: [the periods in order]`, `series: [{ name, values: [one per label] }]`, `totalLabels?`, `annotations?: [{ at, series?, text }]`, `legend?` (on), `colors?`.
 
 1. The top edge is the total. When the claim names the total, set `totalLabels: true`: the chart then writes
    the total above the first and the last period. A part of the total has no label: when the claim needs the
