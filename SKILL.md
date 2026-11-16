@@ -77,7 +77,7 @@ there.
 | `title` | the chart title: always about the data on the chart: the measure, by what, when ("Revenue 2025 versus revenue 2026"). It describes; it never comments. 80 characters at most, and never the claim again (the code refuses both) |
 | `unit` | the unit of the values ("USD million"). It is written after the title: "title · unit" |
 | `source` | the source of the numbers |
-| `format` | `{ decimals, prefix, suffix }` for the values: `{ "decimals": 1, "suffix": "%" }`, `{ "prefix": "$", "suffix": "k" }` |
+| `format` | `{ decimals, prefix, suffix }` for the values: `{ "decimals": 1, "suffix": "%" }`, `{ "prefix": "$", "suffix": "k" }`. `maxDecimals` in place of `decimals` shows up to that many decimals and no end zeros |
 | `formatX` | the same for the x axis of `scatter` and `histogram` |
 | `label` | the accessible name; the claim when not given |
 | `width`, `height` | the size on a page; the caller and the slide box replace them |
@@ -171,7 +171,7 @@ python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim o
 `--out` alone writes one slide: the claim as the slide title, then the chart under its own title, with its source.
 `--into` draws into a slide of an existing deck: write the claim into the slide's own title. `--replace`
 gives the chart the box of a named shape and removes that shape; `--box` is x, y, width and height in
-points. Each chart has its own title and its own source line; `--bare` leaves them out.
+points. With both, the shape goes and the chart takes the box given. Each chart has its own title and its own source line; `--bare` leaves them out.
 
 The chart is one group of native shapes that a person can edit in PowerPoint: bars are rectangles, lines
 are lines, slices are arcs, each label is a text box, and each mark has its tooltip text as its name.

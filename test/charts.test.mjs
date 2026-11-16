@@ -660,3 +660,8 @@ test('callouts: a point that is not on the chart, or too many callouts, is refus
   assert.throws(() => charts.chart({ ...spec, annotations: [{ at: 'Search' }] }), /needs "text"/);
   assert.throws(() => charts.chart({ ...examples.find(([, s]) => s.chart === 'donut')[1], annotations: [{ at: 'Produce', text: 'x' }] }), /donut does not take "annotations"/);
 });
+
+test('format: maxDecimals shows up to that many decimals and no end zeros', () => {
+  const out = charts.chart({ chart: 'barChart', format: { prefix: '$', maxDecimals: 2 }, data: [{ label: 'A', value: 1.5 }, { label: 'B', value: 2 }, { label: 'C', value: 1.234 }] });
+  assert.ok(out.includes('>$1.5<') && out.includes('>$2<') && out.includes('>$1.23<'));
+});

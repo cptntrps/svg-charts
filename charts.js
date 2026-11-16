@@ -1199,7 +1199,7 @@ export function rankedTable({ rows = [], columns = [], valueLabel = 'Value', tot
 // One spec for every chart: chart(spec) draws a plain JSON spec, so that a page and the deck renderer
 // (deck/chart.py) use one file. The spec is the builder's options plus:
 //   chart: the builder name; claim: the finding as one sentence (page heading and slide title, not drawn here);
-//   format / formatX: { decimals, prefix, suffix }, the JSON form of fmtY / fmtX.
+//   format / formatX: { decimals, maxDecimals, prefix, suffix }, the JSON form of fmtY / fmtX.
 // scatter: a group's line is { from, to, slope, intercept } or { fit: 'linear' } (least squares through its points).
 // chart(spec, { width, height, strict, bare }): width and height replace those of the spec. For a chart whose height
 // follows its rows, `height` is the room it has: the rows grow or shrink to use it, inside the limits of the type.
@@ -1236,8 +1236,9 @@ export const chartTypes = {
   wordCloud: { fn: wordCloud, keys: ['words', 'minSize', 'maxSize', 'colors'], height: true },
   rankedTable: { fn: rankedTable, keys: ['rows', 'columns', 'valueLabel', 'total', 'change', 'sort', 'highlight', 'rowHeight', 'colors'], ownFormat: true },
 };
+// decimals fixes the number of decimals. maxDecimals shows up to that many and no end zeros (1.5 and 2, not 1.50 and 2.00).
 const formatter = f => v => !fin(v) ? 'n/a' : (v < 0 ? '−' : '') + (f.prefix ?? '') +
-  Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: f.decimals ?? 0, maximumFractionDigits: f.decimals ?? 0 }) + (f.suffix ?? '');
+  Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: f.decimals ?? 0, maximumFractionDigits: f.maxDecimals ?? f.decimals ?? 0 }) + (f.suffix ?? '');
 // Items that are told apart by colour only: past five the palette starts again, and two items share a colour.
 const coloured = (list, name, colors) => list.filter(it => !(it.color || (colors && !Array.isArray(colors) && colors[it[name]]))).length;
 const LIMITS = {
