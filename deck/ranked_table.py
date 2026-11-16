@@ -339,7 +339,8 @@ def add_target_args(ap, many=False):
     ap.add_argument('--on', choices=['light', 'dark'], help='background of the slide; read from the deck when not given')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--list')
-    ap.add_argument('--subtitle', help='one or two lines under the slide title that say what the numbers are: the measure, the unit, the period. Not a comment on the chart. The default is the "title · unit" of the spec')
+    ap.add_argument('--subtitle', help='one or two lines about the slide, under its title: the scope, the period, the premise. '
+                    'It is not a chart title: each chart has its own title, which says what its data is')
     ap.add_argument('--takeaway', help='one or two bold lines under the chart: the comment, what the reader must conclude or do')
 
 
@@ -358,19 +359,18 @@ TITLE_GAP = 22                   # points between the title block and the chart
 
 
 def new_deck_box(spec, subtitle=None):
-    """Layout of the one-slide deck that --out writes: the claim as the title, the subtitle under it, then the
-    chart box. The subtitle says what the numbers are (the measure, the unit, the period): the "title · unit" of
-    the spec when none is given. Returns a dict; `box` is x, y, w, h in points."""
+    """Layout of the one-slide deck that --out writes: the claim as the slide title, the subtitle of the slide
+    when one is given, then the chart box. The chart has its own title (what its data is) and its own source.
+    Returns a dict; `box` is x, y, w, h in points."""
     head = wrap(spec.get('claim') or spec.get('title') or '', 864, 24, 0.56)
     if len(head) > 3:
         raise SpecError(f'the claim needs {len(head)} lines at 24pt, the slide holds 3: shorten it')
     head_h = 30 * max(1, len(head))
-    text = subtitle or ' · '.join(str(spec[k]) for k in (('title', 'unit') if spec.get('claim') else ('unit',)) if spec.get(k))
-    lines = wrap(text, 864, SUB_FS) if text else []
+    lines = wrap(subtitle, 864, SUB_FS) if subtitle else []
     if len(lines) > 2:
         raise SpecError(f'the subtitle needs {len(lines)} lines, it has 2: shorten it')
     top = 32 + head_h + 6 + (SUB_LINE * len(lines) + 4 if lines else 0) + TITLE_GAP
-    return dict(head=head, head_h=head_h, subtitle=text, box=[48, top, 864, 486 - top])
+    return dict(head=head, head_h=head_h, subtitle=subtitle or '', box=[48, top, 864, 500 - top])
 
 
 def furnish_box(box, subtitle=None, takeaway=None):
@@ -441,8 +441,7 @@ def furnish(slide, box, subtitle=None, takeaway=None, dark=False, accent=None):
 def open_target(a, spec):
     """The deck, the slide and the box (x, y, w, h in points) the chart goes to.
     With --into: an existing slide, the box of --replace (that shape is removed) or --box.
-    Without: a new 16:9 deck with one slide: the claim as its title, the subtitle, "title · unit" under it,
-    the source at the bottom."""
+    Without: a new 16:9 deck with one slide: the claim as its title and the subtitle of the slide under it."""
     from pptx import Presentation
     from pptx.util import Pt
     if a.into:
@@ -480,7 +479,7 @@ def open_target(a, spec):
             _ink(r.font.color, level, False)
     # One text box holds the title block, so the subtitle follows the title where the title really ends: the
     # line count is an estimate, the font of the machine decides. The slide title is the claim (the finding as a
-    # sentence); the subtitle (what the numbers are) goes under it.
+    # sentence); the subtitle of the slide goes under it.
     block = [(' '.join(lay['head']), 24, True, 0.0)] if lay['head'] else []
     if lay['subtitle']:
         block.append((lay['subtitle'], SUB_FS, False, 0.35))
@@ -498,11 +497,6 @@ def open_target(a, spec):
             if i:
                 p.space_before = Pt(4)
             run(p, text, size, bold, level)
-    if spec.get('source'):
-        tb = slide.shapes.add_textbox(Pt(48), Pt(496), Pt(864), Pt(16))
-        tb.name = 'Source'
-        tb.text_frame.margin_left = tb.text_frame.margin_right = 0
-        run(tb.text_frame.paragraphs[0], f"Source: {spec['source']}", 9, False)
     return prs, slide, lay['box']
 
 
@@ -527,7 +521,7 @@ def main(argv=None):
         prs, slide, box = open_target(a, spec)
         dark = a.on == 'dark' if a.on else background_is_dark(prs, slide)
         box = furnish(slide, box, a.subtitle if a.into else None, a.takeaway, dark, a.accent)
-        g = draw(slide, spec, box, a.accent, dark, frame='source' if a.into and a.subtitle else False)
+        g = draw(slide, spec, box, a.accent, dark, frame=True)
         prs.save(a.out)
         print(json.dumps({'ok': True, 'out': a.out, 'slide': a.slide if a.into else 1, 'box_pt': [round(v, 1) for v in box],
                           'used_height_pt': round(g['height'], 1), 'row_height_pt': round(g['rh'], 1),

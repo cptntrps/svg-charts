@@ -74,8 +74,9 @@ there.
 |---|---|
 | `chart` | the chart type: a builder name from the table above |
 | `claim` | the finding as one sentence. It is the page heading and the slide title; the chart does not draw it |
-| `title` | what the chart shows: the measure, by what, when ("Orders by channel"). It describes; it does not comment. 60 characters at most, and never the claim again (the code refuses both) |
-| `unit`, `source` | the unit and the period of the values, the source of the numbers |
+| `title` | the chart title: always about the data on the chart: the measure, by what, when ("Revenue 2025 versus revenue 2026"). It describes; it never comments. 80 characters at most, and never the claim again (the code refuses both) |
+| `unit` | the unit of the values ("USD million"). It is written after the title: "title · unit" |
+| `source` | the source of the numbers |
 | `format` | `{ decimals, prefix, suffix }` for the values: `{ "decimals": 1, "suffix": "%" }`, `{ "prefix": "$", "suffix": "k" }` |
 | `formatX` | the same for the x axis of `scatter` and `histogram` |
 | `label` | the accessible name; the claim when not given |
@@ -130,7 +131,7 @@ draw(); new ResizeObserver(draw).observe(el);
 needed. Pass the width of the container. `height` is the room the chart has: a chart whose height follows
 its rows (`hbarChart`, `heatmap`, `bullet`, `boxPlot`, `funnel`, `calendar`) then sizes its rows to that room.
 `strict: true` applies the slide checks (for a printed report or an image). `bare: true` leaves out the
-title, unit and source lines. When "title · unit" is wider than the chart, the unit moves to a second line. On a page a label wider than its place is cut with an ellipsis and the
+title, unit and source lines. The chart title runs the width of the chart and goes to a next line only where the chart ends. On a page a label wider than its place is cut with an ellipsis and the
 tooltip has the full text.
 
 ## On a slide
@@ -144,11 +145,10 @@ python3 deck/chart.py spec.json --into deck.pptx --slide 3 --box 40,130,880,330 
 python3 deck/chart.py a.json b.json c.json --out slide.pptx --title "The claim of the slide"   # two or three charts side by side
 ```
 
-`--out` alone writes one slide: the claim as the title, "title · unit" under it as the subtitle, the chart, the source.
+`--out` alone writes one slide: the claim as the slide title, then the chart under its own title, with its source.
 `--into` draws into a slide of an existing deck: write the claim into the slide's own title. `--replace`
 gives the chart the box of a named shape and removes that shape; `--box` is x, y, width and height in
-points. The chart keeps its "title · unit" line and its source line; `--bare` leaves them out when the
-slide has its own places for them.
+points. Each chart has its own title and its own source line; `--bare` leaves them out.
 
 The chart is one group of native shapes that a person can edit in PowerPoint: bars are rectangles, lines
 are lines, slices are arcs, each label is a text box, and each mark has its tooltip text as its name.
@@ -164,31 +164,31 @@ The script needs `python-pptx`, and `node` for every chart but `rankedTable` (`c
 geometry). Exit 0 prints one JSON line (the chart, the box, the size used). Exit 2 means nothing is written,
 with the reason and the remedy. A slide never gets an ellipsis, smaller text or a missing label.
 
-### Title, subtitle and takeaway
+### The text on a slide
 
-A slide has four kinds of text around its charts, and each has one job:
+Each line of text on a slide has one job. Do not mix them:
 
 | Line | Job | Example |
 |---|---|---|
-| Title | the claim: the finding as one sentence | "Support tickets fell by a third after the March release" |
-| Chart title | what the chart shows; it describes | "Support tickets · tickets per month" |
-| Subtitle | what the numbers are: the measure, the unit, the period, the scope. It is not a comment on the chart | "Number of support tickets per month, all regions, 2026" |
-| Takeaway | the comment: what the reader must conclude or do. It does not say the claim again | "Move the support budget of the third quarter to the release team" |
+| Slide title | the claim: the finding as one sentence | "Growth came from the Team plan and from food spend" |
+| Slide subtitle | about the slide: the scope, the period, the premise. It also keeps the charts off the title | "All regions; the first half of 2026 against the first half of 2025" |
+| Section header | one per chart on a shared slide: a numbered comment that the chart under it proves | "① The Team plan passed the Free plan in May" |
+| Chart title | always about the data on the chart: the measure, by what, when, and the unit. Never a comment | "Revenue 2025 versus revenue 2026 · USD million" |
+| Takeaway | the bottom line of the slide: what the reader must conclude or do | "Move the support budget to the Team plan" |
 
 ```sh
-python3 deck/chart.py spec.json --out slide.pptx --subtitle "Number of support tickets per month, all regions, 2026" --takeaway "Move the support budget to the release team"
+python3 deck/chart.py spec.json --out slide.pptx --subtitle "All regions, January to June 2026" --takeaway "Move the support budget to the release team"
 ```
 
-- For one chart the subtitle is the "title · unit" of the spec when you give none. `--subtitle` takes its
-  place, so it must still name the measure and the unit. On a slide with two or three charts, `--subtitle`
-  names what they share (the company, the period, the currency) and each chart keeps its own "title · unit".
-- `--takeaway` writes one or two bold lines with an accent bar under the charts. Use it when the slide asks
-  for a decision. Leave it out when it would only say the title again.
-- Both take two lines at most, and both take their room from the chart: `--check` with the same options
-  tells if the chart still fits.
+- The chart title is the `title` and the `unit` of the spec, as "title · unit". It runs the width of the
+  chart and goes to a next line only where the chart ends. Every chart has it, on every slide and page.
+- The slide title is the `claim` of the spec (one chart) or `--title` (two or three charts). On a shared
+  slide the `claim` of each spec becomes the section header above its chart.
+- `--subtitle` and `--takeaway` are optional and belong to the slide. Each takes two lines at most and takes
+  its room from the charts: `--check` with the same options tells if the charts still fit.
 - With `--into`, the subtitle stands at the top of the box and the takeaway at its bottom, in the font of
   the template. When the template has its own places for them, write them there and do not give the options.
-- `--out` keeps 22pt between the title block and the chart.
+- `--out` keeps 22pt between the title block and the first chart or section.
 
 ### Two or three charts on one slide
 
@@ -199,9 +199,9 @@ python3 deck/chart.py a.json b.json c.json --check --title "The claim of the sli
 ```
 
 Give two or three spec files. The script divides the box into equal columns with 24pt between them. Each
-column has, from the top: the takeaway of the chart with a number badge (the `claim` of its spec, 13pt,
-3 lines at most), the title of the chart with its unit on the line under it, the legend, the plot, the source.
-The badge tells the reader that the line is a comment: the title of a chart always says what the chart shows. `--out` alone needs `--title`: the
+column is a section, from the top: the section header (a rule, a light band, a number badge and the `claim`
+of the spec, 13pt, 3 lines at most), the chart title (what the data is, the width of the chart), the legend,
+the plot, the source. `--out` alone needs `--title`: the
 claim of the whole slide. With `--into`, write that claim into the slide's own title. When one chart does
 not fit its column, nothing is written. Four or more charts are refused.
 
@@ -210,8 +210,7 @@ not fit its column, nothing is written. Four or more charts are refused.
 2. When the reader must compare the charts with each other, give them the same chart type, the same unit and
    the same order of items. The script does not give charts a common axis: for an exact comparison, put the
    series in one chart (`groupedBars`, `lineChart`).
-3. A column of three is about 270pt wide and a column of two about 420pt. A title and unit that are wider
-   than the column take two lines. Not every form fits:
+3. A column of three is about 270pt wide and a column of two about 420pt. Not every form fits:
 
 | Form | Two per slide | Three per slide |
 |---|---|---|

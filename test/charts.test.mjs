@@ -574,14 +574,18 @@ test('stackedArea: totalLabels writes the first and the last total', () => {
   assert.ok(!charts.chart({ ...spec, totalLabels: false }).includes('>$92k</text>'));
 });
 
-test('frame: in a narrow chart the unit stands on its own line under the title', () => {
+test('frame: the chart title runs the width of the chart and goes to a next line only where the chart ends', () => {
   const spec = examples.find(([, s]) => s.chart === 'heatmap')[1];
-  const wide = charts.chart(spec, { width: 864 }), narrow = charts.chart(spec, { width: 272, strict: true });
-  assert.ok(wide.includes('<tspan'), 'one line when it fits');
-  assert.ok(narrow.includes(`<text x="4" y="15" font-size="14" font-weight="700" fill="var(--chart-ink,#141716)">${spec.title}</text>`), 'the title alone on line one');
-  assert.ok(new RegExp(`<text x="4" y="31" font-size="12"[^>]*>${spec.unit}</text>`).test(narrow), 'the unit on line two');
+  const lines = s => [...s.matchAll(/<text x="4" y="(\d+)" font-size="14" font-weight="700"[^>]*>(.*?)<\/text>/g)].map(m => [+m[1], m[2].replace(/<[^>]+>/g, '')]);
+  const wide = lines(charts.chart(spec, { width: 864 })), narrow = lines(charts.chart(spec, { width: 272, strict: true }));
+  assert.deepEqual(wide, [[15, `${spec.title} · ${spec.unit}`]], 'one line when it fits');
+  assert.equal(narrow.length, 2, 'two lines at 272px');
+  assert.equal(narrow.map(l => l[1]).join(' '), `${spec.title} · ${spec.unit}`, 'no word is lost and none is cut');
+  assert.deepEqual(narrow.map(l => l[0]), [15, 31]);
+  assert.ok(narrow[0][1].length * 14 * 0.6 * 0.86 > 272 * 0.6, 'the first line is filled before the break, it does not stop after the title');
   const firstRow = s => Math.min(...[...s.matchAll(/<rect x="[\d.]+" y="([\d.]+)"[^>]*rx="3"/g)].map(m => +m[1]));
-  assert.ok(firstRow(narrow) >= 38 + 20, 'the cells start under the two lines');
+  assert.ok(firstRow(charts.chart(spec, { width: 272 })) >= 38 + 20, 'the cells start under the two lines');
+  assert.throws(() => charts.chart({ ...spec, title: 'A title that has very many words in it to say what the data is', unit: 'and a unit that goes on for a long time after it' }, { width: 200, strict: true }), /is cut/);
 });
 
 test('dumbbell: a narrow chart gives the label column only the width of its labels', () => {
@@ -626,6 +630,6 @@ test('legend positions keep the height of a chart whose height follows its rows'
 test('chart: the title says what the chart shows, the claim has the finding', () => {
   const spec = examples.find(([, s]) => s.chart === 'barChart')[1];
   assert.throws(() => charts.chart({ ...spec, title: spec.claim }), /"title" repeats the claim/);
-  assert.throws(() => charts.chart({ ...spec, title: 'Orders by channel rose in every region and Search now brings the most of them' }), /the limit is 60/);
-  for (const [file, s] of examples) if (s.title) assert.ok(s.title.length <= 60 && s.title !== s.claim, file);
+  assert.throws(() => charts.chart({ ...spec, title: 'Orders by channel rose in every region and Search now brings the most of them, by far' }), /the limit is 80/);
+  for (const [file, s] of examples) if (s.title) assert.ok(s.title.length <= 80 && s.title !== s.claim, file);
 });
