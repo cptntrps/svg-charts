@@ -163,7 +163,7 @@ function textW(s, fs) { return String(s).length * fs * 0.6; }
 // keeps from it: 14px for the target label, 2px for value labels.
 function labelBox(x, y, text, anchor = 'end', fs = 12, m = 14) {
   const w = textW(text, fs), x0 = anchor === 'end' ? x - w : anchor === 'middle' ? x - w / 2 : x;
-  return { x0, x1: x0 + w, y0: y - fs, y1: y + 3, m };
+  return { x0, x1: x0 + w, y0: y - fs, y1: y + 3, m, text: true };
 }
 // A drawn line segment a callout must not cross; sampled at 8 x positions.
 const segment = (x1, y1, x2, y2, m = 2) => ({ seg: true, x1, y1, x2, y2, m });
@@ -178,6 +178,56 @@ function nearBox(a, b) {
   }
   return false;
 }
+
+// Route a leader around text rectangles; data lines remain crossable.
+function routeLeader(points, geo) {
+  const boxes = (geo.avoid || []).filter(b => b.text).map(b => ({
+    x0: b.x0 - 2, x1: b.x1 + 2, y0: b.y0 - 2, y1: b.y1 + 2,
+  }));
+  const crosses = (a, b, r) => {
+    let lo = 0, hi = 1;
+    for (const [v, d, min, max] of [[a[0], b[0] - a[0], r.x0, r.x1], [a[1], b[1] - a[1], r.y0, r.y1]]) {
+      if (!d) { if (v <= min || v >= max) return false; }
+      else { const t0 = (min - v) / d, t1 = (max - v) / d; lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1)); }
+    }
+    return lo < hi;
+  };
+  const clear = (a, b) => !boxes.some(r => crosses(a, b, r));
+  if (points.slice(1).every((p, i) => clear(points[i], p))) return points;
+  const start = points[0], end = points.at(-1);
+  const xs = [...new Set([start[0], end[0], ...boxes.flatMap(b => [b.x0 - 1, b.x1 + 1])])].sort((a, b) => a - b);
+  const ys = [...new Set([start[1], end[1], ...boxes.flatMap(b => [b.y0 - 1, b.y1 + 1])])].sort((a, b) => a - b);
+  const key = (x, y) => y * xs.length + x;
+  const point = k => [xs[k % xs.length], ys[Math.floor(k / xs.length)]];
+  const first = key(xs.indexOf(start[0]), ys.indexOf(start[1])), last = key(xs.indexOf(end[0]), ys.indexOf(end[1]));
+  const distance = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+  const costs = new Map([[first, 0]]), previous = new Map(), pending = new Set([first]);
+  while (pending.size) {
+    let current, best = Infinity;
+    for (const k of pending) { const score = costs.get(k) + distance(point(k), end); if (score < best) { current = k; best = score; } }
+    if (current === last) {
+      const path = [end];
+      while (previous.has(current)) { current = previous.get(current); path.push(point(current)); }
+      path.reverse();
+      return path.filter((p, i) => !i || i === path.length - 1 ||
+        !((path[i - 1][0] === p[0] && p[0] === path[i + 1][0]) || (path[i - 1][1] === p[1] && p[1] === path[i + 1][1])));
+    }
+    pending.delete(current);
+    const x = current % xs.length, y = Math.floor(current / xs.length), from = point(current);
+    for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+      if (nx < 0 || nx >= xs.length || ny < 0 || ny >= ys.length) continue;
+      const next = key(nx, ny), to = point(next);
+      if (to[0] < 1 || to[0] > geo.W - 1 || to[1] < 1 || to[1] > geo.bottom || !clear(from, to)) continue;
+      const cost = costs.get(current) + distance(from, to);
+      if (cost >= (costs.get(next) ?? Infinity)) continue;
+      costs.set(next, cost); previous.set(next, current); pending.add(next);
+    }
+  }
+  if (geo.bottom - geo.plotTop < 60) throw new RangeError(`the plot gets ${Math.max(0, Math.round(geo.bottom - geo.plotTop))}px of height and needs 60`);
+  throw new RangeError('callout leader cannot clear the text labels');
+}
+const inLabel = (p, geo) => (geo.avoid || []).some(b => b.text && p[0] > b.x0 - 2 && p[0] < b.x1 + 2 && p[1] > b.y0 - 2 && p[1] < b.y1 + 2);
+const leaderPoints = points => points.map(p => p.map(round2).join(',')).join(' ');
 
 // One callout: a ring on the point, a leader, and the text. The text sits up and
 // to the right, or up and to the left (right-aligned to the point) when the point
@@ -215,16 +265,24 @@ function callout(px, py, text, geo, own, ringOnly = false) {
     }
   }
   const y1 = below ? py + 4 : py - 4, y2 = below ? base - 13 : base - 4;
-  let leader;
+  let leader, points;
   if (inBand) {
     const kx = px < x0 ? x0 - 3 : px > tx ? tx + 3 : px, ky = base + 5;
+    points = [[px, py - 5], [px, ky], ...(kx !== px ? [[kx, ky]] : [])];
     leader = `<polyline fill="none" stroke="${INK}" stroke-width="1" points="${round2(px)},${round2(py - 5)} ${round2(px)},${round2(ky)}` +
       (kx !== px ? ` ${round2(kx)},${round2(ky)}` : '') + `"/>`;
   } else if (own) {
+    points = [[px + d * 5, py], [ex, py], [ex, y2]];
     leader = `<polyline fill="none" stroke="${INK}" stroke-width="1.2" points="${round2(px + d * 5)},${round2(py)} ${round2(ex)},${round2(py)} ${round2(ex)},${round2(y2)}"/>`;
   } else {
+    points = [[px + d * 4, y1], [ex, y2]];
     leader = `<line x1="${round2(px + d * 4)}" y1="${round2(y1)}" x2="${round2(ex)}" y2="${round2(y2)}" stroke="${INK}" stroke-width="1.2"/>`;
   }
+  const moveStart = inBand || inLabel(points[0], geo);
+  if (moveStart) points[0] = [[px + 5, py], [px - 5, py], [px, py + 5], [px, py - 5]]
+    .find(p => p[0] > 0 && p[0] < W && !inLabel(p, geo)) || points[0];
+  const routed = routeLeader(points, geo);
+  if (routed !== points || moveStart) leader = `<polyline fill="none" stroke="${INK}" stroke-width="${inBand ? 1 : 1.2}" points="${leaderPoints(routed)}"/>`;
   return ring + leader +
     `<text x="${round2(tx)}" y="${round2(base)}" text-anchor="${d < 0 ? 'end' : 'start'}" font-size="12" font-weight="700" fill="${INK}">${esc(text)}</text>`;
 }
@@ -276,11 +334,16 @@ function styled(a, i, geo, at, taken) {
   };
   if (a.style === 'box' || a.style === 'pill') {
     const p = at(a, i), m = mark(p), top = topOf(p), lb = label(mid(p), a.text, { filled: a.style === 'pill' });
+    const x2 = Math.min(Math.max(lb.cx, m.x), m.x + m.w);
+    const tip = [x2, top - (a.style === 'pill' ? 3 : 0)];
+    const side = inLabel(tip, geo);
+    const end = side ? [m.x + m.w + 4, m.y + m.h / 2] : tip;
     const around = a.style === 'box'
       ? `<rect x="${round2(m.x - 4)}" y="${round2(top)}" width="${round2(m.w + 8)}" height="${round2(m.y + m.h - top + 3)}" rx="3" fill="none" stroke="${CALL}" stroke-width="1.4" stroke-dasharray="3 3"/>`
-      : `<rect x="${round2(mid(p) - 3)}" y="${round2(top - 3)}" width="6" height="6" rx="3" fill="${CALL}"/>`;
-    const x2 = Math.min(Math.max(lb.cx, m.x), m.x + m.w);
-    return around + line(lb.cx, yc + bh / 2, x2, top - (a.style === 'pill' ? 3 : 0)) + lb.svg;
+      : `<rect x="${round2(side ? end[0] - 3 : mid(p) - 3)}" y="${round2(side ? end[1] - 3 : top - 3)}" width="6" height="6" rx="3" fill="${CALL}"/>`;
+    const points = [[lb.cx, yc + bh / 2], end], routed = routeLeader(points, geo);
+    const leader = routed === points ? line(...points.flat()) : `<polyline fill="none" stroke="${CALL}" stroke-width="1.3" points="${leaderPoints(routed)}"/>`;
+    return around + leader + lb.svg;
   }
   if (a.style === 'event') {
     const p = at(a, i), lb = label(p[0], a.text);
